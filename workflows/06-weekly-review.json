@@ -1,0 +1,194 @@
+{
+  "name": "Trading Wizard — Weekly Review",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "f1000001-0006-0001-0001-000000000001",
+      "name": "Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 400]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COUNT(*) as count FROM trades WHERE session_date >= CURRENT_DATE - INTERVAL '30 days'",
+        "options": {}
+      },
+      "id": "f1000001-0006-0001-0001-000000000002",
+      "name": "Check Trade Count",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [480, 400],
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": "Trading Wizard DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.count }}",
+              "rightValue": "5",
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f1000001-0006-0001-0001-000000000003",
+      "name": "Enough Trades?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [720, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { response: 'Not enough trades for a meaningful review. You need at least 5 trades in the last 30 days. Keep trading and try again later.' } }];"
+      },
+      "id": "f1000001-0006-0001-0001-000000000010",
+      "name": "Not Enough",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 560]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  t.ticker, t.buy_price, t.sell_price, t.quantity,\n  t.pnl_amount, t.pnl_pct, t.outcome,\n  t.hit_take_profit, t.hit_stop_loss, t.exited_early,\n  t.feedback_tags, t.notes, t.session_date,\n  s.confidence, s.type as signal_type,\n  s.entry_low, s.entry_high, s.take_profit, s.stop_loss,\n  s.risk_reward, s.reasoning, s.catalysts, s.risk_level\nFROM trades t\nLEFT JOIN signals s ON t.signal_id = s.id\nWHERE t.session_date >= CURRENT_DATE - INTERVAL '30 days'\nORDER BY t.session_date DESC\nLIMIT 30",
+        "options": {}
+      },
+      "id": "f1000001-0006-0001-0001-000000000004",
+      "name": "Load Trades + Signals",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [960, 300],
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": "Trading Wizard DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const trades = $input.all().map(i => i.json);\nconst total = trades.length;\nconst wins = trades.filter(t => t.outcome === 'WIN').length;\nconst losses = trades.filter(t => t.outcome === 'LOSS').length;\nconst winRate = total > 0 ? Math.round((wins / total) * 10000) / 100 : 0;\n\nconst winTrades = trades.filter(t => t.outcome === 'WIN');\nconst lossTrades = trades.filter(t => t.outcome === 'LOSS');\nconst avgWin = winTrades.length > 0\n  ? Math.round(winTrades.reduce((s, t) => s + parseFloat(t.pnl_pct || 0), 0) / winTrades.length * 100) / 100 : 0;\nconst avgLoss = lossTrades.length > 0\n  ? Math.round(lossTrades.reduce((s, t) => s + parseFloat(t.pnl_pct || 0), 0) / lossTrades.length * 100) / 100 : 0;\nconst totalPnl = Math.round(trades.reduce((s, t) => s + parseFloat(t.pnl_amount || 0), 0) * 100) / 100;\n\nconst byConfidence = {};\nfor (const t of trades) {\n  const conf = parseInt(t.confidence);\n  if (!conf) continue;\n  const range = conf >= 80 ? '80+' : conf >= 70 ? '70-79' : '60-69';\n  if (!byConfidence[range]) byConfidence[range] = { wins: 0, total: 0 };\n  byConfidence[range].total++;\n  if (t.outcome === 'WIN') byConfidence[range].wins++;\n}\n\nconst tagCounts = {};\nfor (const t of trades) {\n  try {\n    const tags = typeof t.feedback_tags === 'string' ? JSON.parse(t.feedback_tags) : (t.feedback_tags || []);\n    for (const tag of tags) { tagCounts[tag] = (tagCounts[tag] || 0) + 1; }\n  } catch(e) {}\n}\n\nconst byTicker = {};\nfor (const t of trades) {\n  if (!byTicker[t.ticker]) byTicker[t.ticker] = { wins: 0, total: 0, pnl: 0 };\n  byTicker[t.ticker].total++;\n  byTicker[t.ticker].pnl += parseFloat(t.pnl_amount) || 0;\n  if (t.outcome === 'WIN') byTicker[t.ticker].wins++;\n}\n\nreturn [{ json: { trades, stats: { total, wins, losses, winRate, avgWin, avgLoss, totalPnl, byConfidence, tagCounts, byTicker } } }];"
+      },
+      "id": "f1000001-0006-0001-0001-000000000005",
+      "name": "Calculate Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer YOUR_OPENROUTER_KEY" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "HTTP-Referer", "value": "http://localhost:5678" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"google/gemini-2.0-flash\",\n  \"temperature\": 0.3,\n  \"max_tokens\": 2048,\n  \"response_format\": { \"type\": \"json_object\" },\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a trading performance analyst. Analyze one trader's results and generate specific, actionable insights. Write insights as concise English statements (they will be injected into future AI analysis prompts). Write the summary in the user's language (Polish by default).\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Analyze the following trading data from the last 30 days.\\n\\nTASK:\\n1. What distinguishes winning signals from losing ones?\\n2. What patterns appear in feedback tags?\\n3. Which tickers perform best/worst?\\n4. What specific recommendations for future sessions?\\n\\nSTATISTICS: \" + {{ JSON.stringify(JSON.stringify($json.stats)) }} + \"\\n\\nTRADES: \" + {{ JSON.stringify(JSON.stringify($json.trades.slice(0, 20))) }} + \"\\n\\nRESPOND WITH VALID JSON ONLY:\\n{\\\"insights\\\":[\\\"insight 1 in English\\\", \\\"insight 2\\\"],\\\"adjustments\\\":{\\\"min_confidence\\\":65,\\\"preferred_sectors\\\":[],\\\"avoid_tickers\\\":[],\\\"preferred_volume_ratio\\\":1.5},\\\"summary\\\":\\\"Summary in user's language (Polish)\\\"}\"\n    }\n  ]\n}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "f1000001-0006-0001-0001-000000000006",
+      "name": "AI Review",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst stats = $('Calculate Stats').first().json.stats;\n\nlet content = response.choices?.[0]?.message?.content || '';\ncontent = content.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(content);\n} catch (e) {\n  return [{ json: { error: true, response: 'AI returned invalid JSON during review. Try again.' } }];\n}\n\nreturn [{\n  json: {\n    insights: parsed.insights || [],\n    adjustments: parsed.adjustments || {},\n    summary: parsed.summary || '',\n    win_rate: stats.winRate,\n    trades_analyzed: stats.total,\n    week_start: new Date(Date.now() - new Date().getDay() * 86400000).toISOString().split('T')[0],\n  }\n}];"
+      },
+      "id": "f1000001-0006-0001-0001-000000000007",
+      "name": "Validate Review",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO insights (week_start, trades_analyzed, win_rate, insights, adjustments, summary, raw_stats)\nVALUES (\n  '{{ $json.week_start }}',\n  {{ $json.trades_analyzed }},\n  {{ $json.win_rate }},\n  '{{ JSON.stringify($json.insights) }}',\n  '{{ JSON.stringify($json.adjustments) }}',\n  '{{ $json.summary.replace(/'/g, \"''\") }}',\n  '{{ JSON.stringify($('Calculate Stats').first().json.stats) }}'\n)",
+        "options": {}
+      },
+      "id": "f1000001-0006-0001-0001-000000000008",
+      "name": "Save Insights",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1920, 300],
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": "Trading Wizard DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Validate Review').first().json;\n\nif (data.error) return [{ json: { response: data.response } }];\n\nlet response = `WEEKLY REVIEW COMPLETE\\n\\n`;\nresponse += `Win rate: ${data.win_rate}% | Trades analyzed: ${data.trades_analyzed}\\n\\n`;\nresponse += `KEY INSIGHTS:\\n`;\nconst insights = data.insights || [];\ninsights.forEach((insight, i) => { response += `${i + 1}. ${insight}\\n`; });\nresponse += `\\nSUMMARY: ${data.summary}`;\n\nreturn [{ json: { response } }];"
+      },
+      "id": "f1000001-0006-0001-0001-000000000009",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2160, 300]
+    }
+  ],
+  "connections": {
+    "Trigger": {
+      "main": [[ { "node": "Check Trade Count", "type": "main", "index": 0 } ]]
+    },
+    "Check Trade Count": {
+      "main": [[ { "node": "Enough Trades?", "type": "main", "index": 0 } ]]
+    },
+    "Enough Trades?": {
+      "main": [
+        [ { "node": "Load Trades + Signals", "type": "main", "index": 0 } ],
+        [ { "node": "Not Enough", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Load Trades + Signals": {
+      "main": [[ { "node": "Calculate Stats", "type": "main", "index": 0 } ]]
+    },
+    "Calculate Stats": {
+      "main": [[ { "node": "AI Review", "type": "main", "index": 0 } ]]
+    },
+    "AI Review": {
+      "main": [[ { "node": "Validate Review", "type": "main", "index": 0 } ]]
+    },
+    "Validate Review": {
+      "main": [[ { "node": "Save Insights", "type": "main", "index": 0 } ]]
+    },
+    "Save Insights": {
+      "main": [[ { "node": "Format Response", "type": "main", "index": 0 } ]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [{ "name": "Finance" }]
+}

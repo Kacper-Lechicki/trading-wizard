@@ -1,0 +1,125 @@
+{
+  "name": "Trading Wizard — Trade Logger",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "d1b2c3d4-0004-0001-0001-000000000001",
+      "name": "Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\nconst buyPrice = parseFloat(input.buy_price);\nconst sellPrice = parseFloat(input.sell_price);\nconst quantity = parseInt(input.quantity) || 1;\n\nconst pnlAmount = Math.round((sellPrice - buyPrice) * quantity * 100) / 100;\nconst pnlPct = Math.round(((sellPrice - buyPrice) / buyPrice) * 10000) / 100;\n\nlet outcome = input.outcome;\nif (!outcome) {\n  if (pnlAmount > 0) outcome = 'WIN';\n  else if (pnlAmount < 0) outcome = 'LOSS';\n  else outcome = 'BREAKEVEN';\n}\n\nreturn [{\n  json: {\n    ticker: (input.ticker || '').toUpperCase(),\n    buy_price: buyPrice,\n    sell_price: sellPrice,\n    quantity: quantity,\n    pnl_amount: pnlAmount,\n    pnl_pct: pnlPct,\n    outcome: outcome,\n    hit_take_profit: input.hit_tp || false,\n    hit_stop_loss: input.hit_sl || false,\n    exited_early: input.exited_early || false,\n    feedback_tags: JSON.stringify(input.feedback_tags || []),\n    notes: input.notes || '',\n    session_date: new Date().toISOString().split('T')[0],\n  }\n}];"
+      },
+      "id": "d1b2c3d4-0004-0001-0001-000000000002",
+      "name": "Calculate P&L",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id FROM signals WHERE ticker = '{{ $json.ticker }}' AND session_date = '{{ $json.session_date }}' AND type = 'BUY' ORDER BY created_at DESC LIMIT 1",
+        "options": {}
+      },
+      "id": "d1b2c3d4-0004-0001-0001-000000000003",
+      "name": "Find Matching Signal",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [720, 300],
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": "Trading Wizard DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO trades (session_date, signal_id, ticker, buy_price, sell_price, quantity, pnl_amount, pnl_pct, outcome, hit_take_profit, hit_stop_loss, exited_early, feedback_tags, notes)\nVALUES (\n  '{{ $('Calculate P&L').first().json.session_date }}',\n  {{ $json.id ? $json.id : 'NULL' }},\n  '{{ $('Calculate P&L').first().json.ticker }}',\n  {{ $('Calculate P&L').first().json.buy_price }},\n  {{ $('Calculate P&L').first().json.sell_price }},\n  {{ $('Calculate P&L').first().json.quantity }},\n  {{ $('Calculate P&L').first().json.pnl_amount }},\n  {{ $('Calculate P&L').first().json.pnl_pct }},\n  '{{ $('Calculate P&L').first().json.outcome }}',\n  {{ $('Calculate P&L').first().json.hit_take_profit }},\n  {{ $('Calculate P&L').first().json.hit_stop_loss }},\n  {{ $('Calculate P&L').first().json.exited_early }},\n  '{{ $('Calculate P&L').first().json.feedback_tags }}',\n  '{{ $('Calculate P&L').first().json.notes }}'\n)",
+        "options": {}
+      },
+      "id": "d1b2c3d4-0004-0001-0001-000000000004",
+      "name": "Save Trade",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [960, 300],
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": "Trading Wizard DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const trade = $('Calculate P&L').first().json;\nconst pnlSign = trade.pnl_amount >= 0 ? '+' : '';\n\nconst response = `Trade logged successfully!\n\nTicker: ${trade.ticker}\nBuy: $${trade.buy_price} | Sell: $${trade.sell_price}\nQuantity: ${trade.quantity} shares\nP&L: ${pnlSign}$${trade.pnl_amount} (${pnlSign}${trade.pnl_pct}%)\nOutcome: ${trade.outcome}\n${trade.feedback_tags && trade.feedback_tags !== '[]' ? 'Feedback: ' + trade.feedback_tags : ''}\n${trade.notes ? 'Notes: ' + trade.notes : ''}`;\n\nreturn [{ json: { response } }];"
+      },
+      "id": "d1b2c3d4-0004-0001-0001-000000000005",
+      "name": "Format Confirmation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 300]
+    }
+  ],
+  "connections": {
+    "Trigger": {
+      "main": [
+        [
+          {
+            "node": "Calculate P&L",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate P&L": {
+      "main": [
+        [
+          {
+            "node": "Find Matching Signal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Matching Signal": {
+      "main": [
+        [
+          {
+            "node": "Save Trade",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Trade": {
+      "main": [
+        [
+          {
+            "node": "Format Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "Finance"
+    }
+  ]
+}

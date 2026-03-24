@@ -1,0 +1,38 @@
+{
+  "name": "Trading Wizard — DB Init",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "Run Once",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "CREATE TABLE IF NOT EXISTS signals (\n    id              SERIAL PRIMARY KEY,\n    created_at      TIMESTAMPTZ DEFAULT NOW(),\n    session_date    DATE NOT NULL,\n    ticker          VARCHAR(10) NOT NULL,\n    company_name    TEXT,\n    market          VARCHAR(5),\n    type            VARCHAR(4) NOT NULL,\n    confidence      INTEGER,\n    entry_low       DECIMAL(10,2),\n    entry_high      DECIMAL(10,2),\n    take_profit     DECIMAL(10,2),\n    stop_loss       DECIMAL(10,2),\n    suggested_shares INTEGER,\n    estimated_cost  DECIMAL(10,2),\n    upside_pct      DECIMAL(5,2),\n    downside_pct    DECIMAL(5,2),\n    risk_reward     DECIMAL(5,2),\n    potential_profit DECIMAL(10,2),\n    potential_loss  DECIMAL(10,2),\n    risk_level      VARCHAR(10),\n    reasoning       TEXT,\n    catalysts       JSONB,\n    educational_note TEXT,\n    risk_warnings   JSONB,\n    price_data      JSONB,\n    news_data       JSONB,\n    session_budget  DECIMAL(10,2),\n    is_top_pick     BOOLEAN DEFAULT FALSE\n);\n\nCREATE TABLE IF NOT EXISTS trades (\n    id              SERIAL PRIMARY KEY,\n    created_at      TIMESTAMPTZ DEFAULT NOW(),\n    session_date    DATE NOT NULL,\n    signal_id       INTEGER REFERENCES signals(id),\n    ticker          VARCHAR(10) NOT NULL,\n    buy_price       DECIMAL(10,2),\n    sell_price      DECIMAL(10,2),\n    quantity        INTEGER,\n    pnl_amount      DECIMAL(10,2),\n    pnl_pct         DECIMAL(5,2),\n    outcome         VARCHAR(10),\n    hit_take_profit BOOLEAN DEFAULT FALSE,\n    hit_stop_loss   BOOLEAN DEFAULT FALSE,\n    exited_early    BOOLEAN DEFAULT FALSE,\n    feedback_tags   JSONB,\n    notes           TEXT,\n    closed_at       TIMESTAMPTZ DEFAULT NOW()\n);\n\nCREATE TABLE IF NOT EXISTS insights (\n    id              SERIAL PRIMARY KEY,\n    created_at      TIMESTAMPTZ DEFAULT NOW(),\n    week_start      DATE NOT NULL,\n    trades_analyzed INTEGER,\n    win_rate        DECIMAL(5,2),\n    insights        JSONB,\n    adjustments     JSONB,\n    summary         TEXT,\n    raw_stats       JSONB\n);\n\nCREATE INDEX IF NOT EXISTS idx_signals_session ON signals(session_date);\nCREATE INDEX IF NOT EXISTS idx_signals_ticker ON signals(ticker);\nCREATE INDEX IF NOT EXISTS idx_trades_session ON trades(session_date);\nCREATE INDEX IF NOT EXISTS idx_trades_ticker ON trades(ticker);\nCREATE INDEX IF NOT EXISTS idx_trades_outcome ON trades(outcome);\nCREATE INDEX IF NOT EXISTS idx_insights_week ON insights(week_start);\n\n-- Add columns if upgrading from older schema\nALTER TABLE signals ADD COLUMN IF NOT EXISTS risk_level VARCHAR(10);\nALTER TABLE signals ADD COLUMN IF NOT EXISTS potential_profit DECIMAL(10,2);\nALTER TABLE signals ADD COLUMN IF NOT EXISTS potential_loss DECIMAL(10,2);\nALTER TABLE signals ADD COLUMN IF NOT EXISTS risk_warnings JSONB;",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000002",
+      "name": "Create Tables",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [480, 300],
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": "Trading Wizard DB"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Run Once": {
+      "main": [[{"node": "Create Tables", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {"executionOrder": "v1"},
+  "tags": [{"name": "Finance"}]
+}

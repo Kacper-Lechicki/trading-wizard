@@ -1,0 +1,19 @@
+# Secrets
+.env
+
+# Docker volumes (local data)
+postgres_data/
+n8n_data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Agent local settings (not rules/commands — those are tracked)
+.claude/settings.local.json

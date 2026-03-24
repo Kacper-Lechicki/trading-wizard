@@ -1,0 +1,75 @@
+{
+  "name": "Trading Wizard — Get History",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "b1b2c3d4-0002-0001-0001-000000000001",
+      "name": "Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  t.ticker,\n  t.buy_price,\n  t.sell_price,\n  t.quantity,\n  t.pnl_amount,\n  t.pnl_pct,\n  t.outcome,\n  t.feedback_tags,\n  t.notes,\n  t.session_date,\n  s.confidence,\n  s.type as signal_type,\n  s.reasoning,\n  s.risk_level\nFROM trades t\nLEFT JOIN signals s ON t.signal_id = s.id\nWHERE t.session_date >= CURRENT_DATE - INTERVAL '30 days'\nORDER BY t.session_date DESC\nLIMIT 50",
+        "options": {}
+      },
+      "id": "b1b2c3d4-0002-0001-0001-000000000002",
+      "name": "Load Trades",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [480, 300],
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": "Trading Wizard DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const trades = $input.all().map(i => i.json);\n\nif (trades.length === 0) {\n  return [{ json: { response: 'No trades found in the last 30 days.' } }];\n}\n\nconst total = trades.length;\nconst wins = trades.filter(t => t.outcome === 'WIN').length;\nconst losses = trades.filter(t => t.outcome === 'LOSS').length;\nconst winRate = total > 0 ? Math.round((wins / total) * 100) : 0;\nconst totalPnl = Math.round(trades.reduce((sum, t) => sum + (parseFloat(t.pnl_amount) || 0), 0) * 100) / 100;\n\nlet response = `TRADE HISTORY (last 30 days)\\n`;\nresponse += `Total: ${total} trades | Wins: ${wins} | Losses: ${losses} | Win rate: ${winRate}%\\n`;\nresponse += `Total P&L: $${totalPnl >= 0 ? '+' : ''}${totalPnl}\\n\\n`;\n\nfor (const t of trades) {\n  const pnlSign = parseFloat(t.pnl_amount) >= 0 ? '+' : '';\n  response += `${t.session_date} | ${t.ticker} | Buy: $${t.buy_price} | Sell: $${t.sell_price} | Qty: ${t.quantity} | P&L: ${pnlSign}$${t.pnl_amount} (${pnlSign}${t.pnl_pct}%) | ${t.outcome}`;\n  if (t.feedback_tags) response += ` | Tags: ${JSON.parse(t.feedback_tags).join(', ')}`;\n  response += '\\n';\n}\n\nreturn [{ json: { response } }];"
+      },
+      "id": "b1b2c3d4-0002-0001-0001-000000000003",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    }
+  ],
+  "connections": {
+    "Trigger": {
+      "main": [
+        [
+          {
+            "node": "Load Trades",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Trades": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "Finance"
+    }
+  ]
+}
