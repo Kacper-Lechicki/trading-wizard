@@ -37,6 +37,14 @@ services:
       retries: 5
     restart: unless-stopped
 
+  searxng:
+    image: searxng/searxng:latest
+    environment:
+      - SEARXNG_BASE_URL=http://searxng:8080
+    volumes:
+      - ./config/searxng:/etc/searxng:rw
+    restart: unless-stopped
+
 volumes:
   n8n_data:
   postgres_data:

@@ -1,5 +1,5 @@
 {
-  "name": "Trading Wizard — Chat",
+  "name": "Trading Wizard \u2014 Chat",
   "nodes": [
     {
       "parameters": {
@@ -14,9 +14,19 @@
     },
     {
       "parameters": {
+        "jsCode": "const message = $input.first().json.chatInput || '';\n\n// Detect Polish by diacritics or common function words\nconst hasPolishChars = /[\u0105\u0107\u0119\u0142\u0144\u00f3\u015b\u017a\u017c\u0104\u0106\u0118\u0141\u0143\u00d3\u015a\u0179\u017b]/.test(message);\nconst polishWords = /\\b(mam|chc\u0119|chce|jest|s\u0105|czy|tak|nie|ile|jak|co|gdzie|kiedy|dla|bez|przy|przed|nad|pod|przez|albo|lub|wi\u0119c|wiec|tylko|jeszcze|ju\u017c|juz|te\u017c|tez|mo\u017ce|moze|prosz\u0119|prosze|dzisiaj|dzi\u015b|dzis|rynek|kupi\u0107|kupic|sprzeda\u0107|sprzedac|akcje|zysk|strata|bud\u017cet|budzet|poka\u017c|pokaz|szukaj|sprawdz|sprawdz|zeskanuj|hej|cze\u015b\u0107|czesc|witaj|dobra|dobrze)\\b/i;\n\nconst isPolish = hasPolishChars || polishWords.test(message);\nconst detectedLanguage = isPolish ? 'POLISH' : 'ENGLISH';\n\nreturn [{\n  json: {\n    ...$input.first().json,\n    chatInput: message,\n    detectedLanguage\n  }\n}];"
+      },
+      "id": "g1000001-0007-0001-0001-000000000011",
+      "name": "Detect Language",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [380, 400]
+    },
+    {
+      "parameters": {
         "options": {
-          "systemMessage": "You are Trading Wizard — a personal intraday trading assistant.\n\nROLE:\n- Help the user trade stocks on US (NYSE/NASDAQ) and European exchanges (LSE, XETRA, Euronext, GPW).\n- Guide them step by step — they are learning. Explain everything in plain language.\n- Give SPECIFIC instructions: what to buy, at what price, how many shares, stop-loss, take-profit.\n- Be patient, direct, and concise. No filler.\n\nLANGUAGE:\n- ALWAYS respond in the same language the user writes in.\n- Default language: Polish.\n- Internal tool calls and data are in English — translate results for the user.\n\nRISK TRANSPARENCY (MANDATORY):\nFor EVERY BUY signal you present, you MUST include ALL of these:\n- Estimated cost (total position cost)\n- Potential PROFIT: dollar amount and percentage if take-profit is hit\n- Potential LOSS: dollar amount and percentage if stop-loss is hit\n- Risk/Reward ratio\n- Stop-loss price and what it means\n- Any risk warnings (earnings proximity, low volume, conflicting signals)\n- A plain-language risk summary\nNEVER hide or minimize the downside. The user must understand what they risk.\n\nINTERACTION RULES:\n1. When the user provides a budget and wants to scan — ALWAYS use scan_market.\n2. When the user reports a trade result — ALWAYS use log_trade.\n3. When the user asks about history or stats — use get_history.\n4. When you need context from past performance — use get_insights.\n5. On the FIRST message of every conversation, silently call get_insights to check if a review is due. If needs_review=true AND the user has not asked for something else, suggest: \"I notice it's been over a week since your last review and you have enough trades. Want me to run a performance analysis?\"\n6. When the user asks for a review or agrees — use run_review.\n7. For every recommendation, explain WHY — the user is learning.\n8. Warn about risks. Never promise profits.\n9. If you don't know something — say so directly.\n\nMARKET CONTEXT:\n- US markets: open 9:30-16:00 ET (15:30-22:00 CET)\n- EU markets: open ~9:00-17:30 CET\n- Price data may have ~15 min delay\n- Broker: XTB — user executes orders manually\n\nFEEDBACK TAGS (for trade logging):\nperfect_execution, exited_too_early, exited_too_late, wrong_entry_price, news_changed_situation, should_have_skipped, stop_loss_saved_me, should_have_held_longer\n\nWhen presenting feedback tags, translate them to the user's language.",
-          "maxIterations": 10
+          "systemMessage": "=CRITICAL LANGUAGE RULE: You MUST respond in {{ $json.detectedLanguage }}. This is NON-NEGOTIABLE. Every word of your response must be in {{ $json.detectedLanguage }}. Ignore the currency mentioned (PLN/EUR/USD) \u2014 it does NOT determine your response language. Only this rule does.\n\nRULE #2 \u2014 WEB SEARCH: ALWAYS use web_search. After every scan_market \u2014 search news for top tickers. When user asks about stocks \u2014 search FIRST, answer SECOND. When unsure \u2014 search. Your training data is OUTDATED for markets.\n\nYou are Trading Wizard \u2014 a personal intraday/swing trading assistant.\n\nROLE: Help trade US (NYSE/NASDAQ) and EU (LSE, XETRA, Euronext) stocks. User is learning \u2014 explain in plain language. Give SPECIFIC instructions: what to buy, price, shares, stop-loss, take-profit. Be direct, no filler.\n\nTOOL USAGE:\n- scan_market: user gives budget, call it. THEN call web_search for top 2-3 tickers before presenting results.\n- log_trade: user reports a trade result.\n- get_history: user asks about past trades/stats.\n- get_insights: call silently on FIRST message to check if review is due.\n- run_review: user asks for or agrees to a review.\n- web_search: call BEFORE answering about stock prices, company news, market conditions, earnings, any current fact. Call AFTER scan_market for top tickers. When user says \"research\" or \"dig deeper\" \u2014 search immediately.\n\nRISK TRANSPARENCY \u2014 every BUY signal MUST include:\n- Trade type (Intraday/Swing) and holding period\n- Estimated cost, potential profit ($+%), potential loss ($+%), R/R ratio\n- Stop-loss price, risk warnings, plain-language risk summary\n- Never hide downside. User must understand what they risk.\n\nTRADE TYPES: Intraday = same day. Swing = 2-5 days (mention overnight risk, suggest alerts).\n\nSMALL BUDGETS: Never dismiss. Present best opportunities. Be honest about $ returns. Fractional shares on XTB.\n\nCURRENCY: Budget in PLN/EUR/USD. Scanner uses USD internally. Convert results to user's currency (1 USD \u2248 4 PLN, 1 EUR \u2248 1.08 USD).\n\nMARKET: US 9:30-16:00 ET (15:30-22:00 CET). EU ~9:00-17:30 CET. ~15 min delay. Broker: XTB.\n\nFEEDBACK TAGS: perfect_execution, exited_too_early, exited_too_late, wrong_entry_price, news_changed_situation, should_have_skipped, stop_loss_saved_me, should_have_held_longer. Translate to user's language.\n\nREMINDER: Your response language is {{ $json.detectedLanguage }}. Always use web_search for market questions.",
+          "maxIterations": 15
         }
       },
       "id": "g1000001-0007-0001-0001-000000000002",
@@ -27,19 +37,19 @@
     },
     {
       "parameters": {
-        "model": "google/gemini-2.0-flash",
+        "model": "google/gemini-2.5-flash",
         "options": {
           "temperature": 0.3,
-          "maxTokens": 4096
+          "maxTokens": 8192
         }
       },
       "id": "g1000001-0007-0001-0001-000000000003",
       "name": "OpenRouter LLM",
-      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
-      "typeVersion": 1.2,
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
       "position": [360, 620],
       "credentials": {
-        "openAiApi": {
+        "openRouterApi": {
           "id": "",
           "name": "OpenRouter"
         }
@@ -58,7 +68,7 @@
     {
       "parameters": {
         "name": "scan_market",
-        "description": "Scans US and European stock markets for the best intraday trading opportunities. Returns signals with full risk disclosure: entry price, stop-loss, take-profit, potential profit/loss, risk/reward ratio, and risk warnings. Use when the user provides a budget and wants to find trades. Parameters: budget (number, amount to invest), currency (string: USD/EUR/PLN), market (string: US/EU/BOTH).",
+        "description": "Scans US and European stock markets for trading opportunities (intraday and swing). Returns signals with risk disclosure. Use when user provides a budget. Input: budget (number), currency (USD/EUR/PLN), market (US/EU/BOTH), fractional_shares (true/false, default true). IMPORTANT: After receiving results from this tool, you MUST call web_search for the top 2-3 ticker symbols to check latest news BEFORE presenting results to the user.",
         "workflowId": {
           "__rl": true,
           "mode": "list",
@@ -74,7 +84,7 @@
     {
       "parameters": {
         "name": "log_trade",
-        "description": "Logs the result of a completed trade. Calculates P&L automatically. Use when the user reports what they bought, sold, and the outcome. Parameters: ticker (string), buy_price (number), sell_price (number), quantity (integer), hit_tp (boolean), hit_sl (boolean), exited_early (boolean), feedback_tags (string array), notes (string optional).",
+        "description": "Logs the result of a completed trade. Calculates P&L automatically. Use when the user reports what they bought, sold, and the outcome. Input: ticker (string), buy_price (number), sell_price (number), quantity (number), hit_tp (bool), hit_sl (bool), exited_early (bool), feedback_tags (JSON string array), notes (string).",
         "workflowId": {
           "__rl": true,
           "mode": "list",
@@ -106,7 +116,7 @@
     {
       "parameters": {
         "name": "get_history",
-        "description": "Retrieves the user's trade history with P&L, outcomes, and statistics from the last 30 days. Use when the user asks about past trades, performance, or win rate.",
+        "description": "Retrieves the user's trade history with P&L, outcomes, and statistics from the last 30 days. Use when the user asks about past trades, performance, or win rate. No parameters needed.",
         "workflowId": {
           "__rl": true,
           "mode": "list",
@@ -122,7 +132,7 @@
     {
       "parameters": {
         "name": "get_insights",
-        "description": "Retrieves latest performance insights AND checks if a weekly review is due. Returns: insights, needs_review flag, trades since last review. Call this at the start of every conversation to check review status.",
+        "description": "Retrieves latest performance insights AND checks if a weekly review is due. Returns: insights, needs_review flag, trades since last review. Call this at the start of every conversation to check review status. No parameters needed.",
         "workflowId": {
           "__rl": true,
           "mode": "list",
@@ -134,10 +144,31 @@
       "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
       "typeVersion": 2,
       "position": [1320, 620]
+    },
+    {
+      "parameters": {
+        "options": {
+          "description": "Search the web for real-time information. You MUST call this tool in these situations \u2014 no exceptions: (1) AFTER scan_market \u2014 search each top ticker for latest news, (2) when the user asks about ANY stock or company \u2014 search BEFORE answering, (3) when the user asks about market conditions \u2014 search BEFORE answering, (4) when the user asks you to research or dig deeper \u2014 search immediately, (5) when you are about to state any fact about current prices, news, or events \u2014 verify with a search first. Your training data is outdated. This tool is free and fast \u2014 use it often. When in doubt, search."
+        }
+      },
+      "id": "g1000001-0007-0001-0001-000000000010",
+      "name": "web_search",
+      "type": "@n8n/n8n-nodes-langchain.toolSearXng",
+      "typeVersion": 1,
+      "position": [1480, 620],
+      "credentials": {
+        "searXngApi": {
+          "id": "",
+          "name": "SearXNG"
+        }
+      }
     }
   ],
   "connections": {
     "When chat message received": {
+      "main": [[ { "node": "Detect Language", "type": "main", "index": 0 } ]]
+    },
+    "Detect Language": {
       "main": [[ { "node": "AI Agent", "type": "main", "index": 0 } ]]
     },
     "OpenRouter LLM": {
@@ -159,6 +190,9 @@
       "ai_tool": [[ { "node": "AI Agent", "type": "ai_tool", "index": 0 } ]]
     },
     "get_insights": {
+      "ai_tool": [[ { "node": "AI Agent", "type": "ai_tool", "index": 0 } ]]
+    },
+    "web_search": {
       "ai_tool": [[ { "node": "AI Agent", "type": "ai_tool", "index": 0 } ]]
     }
   },

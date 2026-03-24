@@ -15,5 +15,5 @@ Thumbs.db
 *.swp
 *.swo
 
-# Agent local settings (not rules/commands — those are tracked)
+# Agent local settings (not rules/commands - those are tracked)
 .claude/settings.local.json

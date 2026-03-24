@@ -1,10 +1,8 @@
 {
-  "name": "Trading Wizard — Weekly Review",
+  "name": "Trading Wizard - Weekly Review",
   "nodes": [
     {
-      "parameters": {
-        "inputSource": "passthrough"
-      },
+      "parameters": { "inputSource": "passthrough" },
       "id": "f1000001-0006-0001-0001-000000000001",
       "name": "Trigger",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
@@ -22,6 +20,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [480, 400],
+      "alwaysOutputData": true,
       "credentials": {
         "postgres": {
           "id": "",
@@ -79,6 +78,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [960, 300],
+      "alwaysOutputData": true,
       "credentials": {
         "postgres": {
           "id": "",
@@ -110,14 +110,15 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"google/gemini-2.0-flash\",\n  \"temperature\": 0.3,\n  \"max_tokens\": 2048,\n  \"response_format\": { \"type\": \"json_object\" },\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a trading performance analyst. Analyze one trader's results and generate specific, actionable insights. Write insights as concise English statements (they will be injected into future AI analysis prompts). Write the summary in the user's language (Polish by default).\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Analyze the following trading data from the last 30 days.\\n\\nTASK:\\n1. What distinguishes winning signals from losing ones?\\n2. What patterns appear in feedback tags?\\n3. Which tickers perform best/worst?\\n4. What specific recommendations for future sessions?\\n\\nSTATISTICS: \" + {{ JSON.stringify(JSON.stringify($json.stats)) }} + \"\\n\\nTRADES: \" + {{ JSON.stringify(JSON.stringify($json.trades.slice(0, 20))) }} + \"\\n\\nRESPOND WITH VALID JSON ONLY:\\n{\\\"insights\\\":[\\\"insight 1 in English\\\", \\\"insight 2\\\"],\\\"adjustments\\\":{\\\"min_confidence\\\":65,\\\"preferred_sectors\\\":[],\\\"avoid_tickers\\\":[],\\\"preferred_volume_ratio\\\":1.5},\\\"summary\\\":\\\"Summary in user's language (Polish)\\\"}\"\n    }\n  ]\n}",
+        "jsonBody": "={\n  \"model\": \"google/gemini-2.5-flash\",\n  \"temperature\": 0.3,\n  \"max_tokens\": 8192,\n  \"response_format\": { \"type\": \"json_object\" },\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a trading performance analyst. Analyze one trader's results and generate specific, actionable insights. Write insights as concise English statements (they will be injected into future AI analysis prompts). Write the summary in the user's language (Polish by default).\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Analyze the following trading data from the last 30 days.\\n\\nTASK:\\n1. What distinguishes winning signals from losing ones?\\n2. What patterns appear in feedback tags?\\n3. Which tickers perform best/worst?\\n4. What specific recommendations for future sessions?\\n\\nSTATISTICS: \" + {{ JSON.stringify(JSON.stringify($json.stats)) }} + \"\\n\\nTRADES: \" + {{ JSON.stringify(JSON.stringify($json.trades.slice(0, 20))) }} + \"\\n\\nRESPOND WITH VALID JSON ONLY:\\n{\\\"insights\\\":[\\\"insight 1 in English\\\", \\\"insight 2\\\"],\\\"adjustments\\\":{\\\"min_confidence\\\":65,\\\"preferred_sectors\\\":[],\\\"avoid_tickers\\\":[],\\\"preferred_volume_ratio\\\":1.5},\\\"summary\\\":\\\"Summary in user's language (Polish)\\\"}\"\n    }\n  ]\n}",
         "options": { "timeout": 60000 }
       },
       "id": "f1000001-0006-0001-0001-000000000006",
       "name": "AI Review",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1440, 300]
+      "position": [1440, 300],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -132,7 +133,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO insights (week_start, trades_analyzed, win_rate, insights, adjustments, summary, raw_stats)\nVALUES (\n  '{{ $json.week_start }}',\n  {{ $json.trades_analyzed }},\n  {{ $json.win_rate }},\n  '{{ JSON.stringify($json.insights) }}',\n  '{{ JSON.stringify($json.adjustments) }}',\n  '{{ $json.summary.replace(/'/g, \"''\") }}',\n  '{{ JSON.stringify($('Calculate Stats').first().json.stats) }}'\n)",
+        "query": "INSERT INTO insights (week_start, trades_analyzed, win_rate, insights, adjustments, summary, raw_stats)\nVALUES (\n  '{{ $json.week_start }}',\n  {{ $json.trades_analyzed }},\n  {{ $json.win_rate }},\n  '{{ JSON.stringify($json.insights).replace(/'/g, \"''\") }}',\n  '{{ JSON.stringify($json.adjustments).replace(/'/g, \"''\") }}',\n  '{{ $json.summary.replace(/'/g, \"''\") }}',\n  '{{ JSON.stringify($('Calculate Stats').first().json.stats).replace(/'/g, \"''\") }}'\n)",
         "options": {}
       },
       "id": "f1000001-0006-0001-0001-000000000008",
@@ -140,6 +141,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [1920, 300],
+      "onError": "continueRegularOutput",
       "credentials": {
         "postgres": {
           "id": "",
@@ -160,31 +162,31 @@
   ],
   "connections": {
     "Trigger": {
-      "main": [[ { "node": "Check Trade Count", "type": "main", "index": 0 } ]]
+      "main": [[{ "node": "Check Trade Count", "type": "main", "index": 0 }]]
     },
     "Check Trade Count": {
-      "main": [[ { "node": "Enough Trades?", "type": "main", "index": 0 } ]]
+      "main": [[{ "node": "Enough Trades?", "type": "main", "index": 0 }]]
     },
     "Enough Trades?": {
       "main": [
-        [ { "node": "Load Trades + Signals", "type": "main", "index": 0 } ],
-        [ { "node": "Not Enough", "type": "main", "index": 0 } ]
+        [{ "node": "Load Trades + Signals", "type": "main", "index": 0 }],
+        [{ "node": "Not Enough", "type": "main", "index": 0 }]
       ]
     },
     "Load Trades + Signals": {
-      "main": [[ { "node": "Calculate Stats", "type": "main", "index": 0 } ]]
+      "main": [[{ "node": "Calculate Stats", "type": "main", "index": 0 }]]
     },
     "Calculate Stats": {
-      "main": [[ { "node": "AI Review", "type": "main", "index": 0 } ]]
+      "main": [[{ "node": "AI Review", "type": "main", "index": 0 }]]
     },
     "AI Review": {
-      "main": [[ { "node": "Validate Review", "type": "main", "index": 0 } ]]
+      "main": [[{ "node": "Validate Review", "type": "main", "index": 0 }]]
     },
     "Validate Review": {
-      "main": [[ { "node": "Save Insights", "type": "main", "index": 0 } ]]
+      "main": [[{ "node": "Save Insights", "type": "main", "index": 0 }]]
     },
     "Save Insights": {
-      "main": [[ { "node": "Format Response", "type": "main", "index": 0 } ]]
+      "main": [[{ "node": "Format Response", "type": "main", "index": 0 }]]
     }
   },
   "settings": {

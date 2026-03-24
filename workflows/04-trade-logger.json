@@ -1,9 +1,22 @@
 {
-  "name": "Trading Wizard — Trade Logger",
+  "name": "Trading Wizard - Trade Logger",
   "nodes": [
     {
       "parameters": {
-        "inputSource": "passthrough"
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            { "name": "ticker", "type": "string" },
+            { "name": "buy_price", "type": "number" },
+            { "name": "sell_price", "type": "number" },
+            { "name": "quantity", "type": "number" },
+            { "name": "hit_tp", "type": "boolean" },
+            { "name": "hit_sl", "type": "boolean" },
+            { "name": "exited_early", "type": "boolean" },
+            { "name": "feedback_tags", "type": "string" },
+            { "name": "notes", "type": "string" }
+          ]
+        }
       },
       "id": "d1b2c3d4-0004-0001-0001-000000000001",
       "name": "Trigger",
@@ -13,7 +26,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const input = $input.first().json;\n\nconst buyPrice = parseFloat(input.buy_price);\nconst sellPrice = parseFloat(input.sell_price);\nconst quantity = parseInt(input.quantity) || 1;\n\nconst pnlAmount = Math.round((sellPrice - buyPrice) * quantity * 100) / 100;\nconst pnlPct = Math.round(((sellPrice - buyPrice) / buyPrice) * 10000) / 100;\n\nlet outcome = input.outcome;\nif (!outcome) {\n  if (pnlAmount > 0) outcome = 'WIN';\n  else if (pnlAmount < 0) outcome = 'LOSS';\n  else outcome = 'BREAKEVEN';\n}\n\nreturn [{\n  json: {\n    ticker: (input.ticker || '').toUpperCase(),\n    buy_price: buyPrice,\n    sell_price: sellPrice,\n    quantity: quantity,\n    pnl_amount: pnlAmount,\n    pnl_pct: pnlPct,\n    outcome: outcome,\n    hit_take_profit: input.hit_tp || false,\n    hit_stop_loss: input.hit_sl || false,\n    exited_early: input.exited_early || false,\n    feedback_tags: JSON.stringify(input.feedback_tags || []),\n    notes: input.notes || '',\n    session_date: new Date().toISOString().split('T')[0],\n  }\n}];"
+        "jsCode": "const input = $input.first().json;\n\nconst buyPrice = parseFloat(input.buy_price);\nconst sellPrice = parseFloat(input.sell_price);\nconst quantity = parseFloat(input.quantity) || 1;\n\nconst pnlAmount = Math.round((sellPrice - buyPrice) * quantity * 100) / 100;\nconst pnlPct = Math.round(((sellPrice - buyPrice) / buyPrice) * 10000) / 100;\n\nlet outcome = input.outcome;\nif (!outcome) {\n  if (pnlAmount > 0) outcome = 'WIN';\n  else if (pnlAmount < 0) outcome = 'LOSS';\n  else outcome = 'BREAKEVEN';\n}\n\nreturn [{\n  json: {\n    ticker: (input.ticker || '').toUpperCase().replace(/[^A-Z0-9.]/g, ''),\n    buy_price: buyPrice,\n    sell_price: sellPrice,\n    quantity: quantity,\n    pnl_amount: pnlAmount,\n    pnl_pct: pnlPct,\n    outcome: outcome,\n    hit_take_profit: input.hit_tp || false,\n    hit_stop_loss: input.hit_sl || false,\n    exited_early: input.exited_early || false,\n    feedback_tags: (() => { const raw = input.feedback_tags; if (!raw) return '[]'; if (typeof raw === 'string') { try { JSON.parse(raw); return raw; } catch(e) { return '[]'; } } return JSON.stringify(raw); })(),\n    notes: input.notes || '',\n    session_date: new Date().toISOString().split('T')[0],\n  }\n}];"
       },
       "id": "d1b2c3d4-0004-0001-0001-000000000002",
       "name": "Calculate P&L",
@@ -32,6 +45,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [720, 300],
+      "alwaysOutputData": true,
       "credentials": {
         "postgres": {
           "id": "",
@@ -42,7 +56,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO trades (session_date, signal_id, ticker, buy_price, sell_price, quantity, pnl_amount, pnl_pct, outcome, hit_take_profit, hit_stop_loss, exited_early, feedback_tags, notes)\nVALUES (\n  '{{ $('Calculate P&L').first().json.session_date }}',\n  {{ $json.id ? $json.id : 'NULL' }},\n  '{{ $('Calculate P&L').first().json.ticker }}',\n  {{ $('Calculate P&L').first().json.buy_price }},\n  {{ $('Calculate P&L').first().json.sell_price }},\n  {{ $('Calculate P&L').first().json.quantity }},\n  {{ $('Calculate P&L').first().json.pnl_amount }},\n  {{ $('Calculate P&L').first().json.pnl_pct }},\n  '{{ $('Calculate P&L').first().json.outcome }}',\n  {{ $('Calculate P&L').first().json.hit_take_profit }},\n  {{ $('Calculate P&L').first().json.hit_stop_loss }},\n  {{ $('Calculate P&L').first().json.exited_early }},\n  '{{ $('Calculate P&L').first().json.feedback_tags }}',\n  '{{ $('Calculate P&L').first().json.notes }}'\n)",
+        "query": "INSERT INTO trades (session_date, signal_id, ticker, buy_price, sell_price, quantity, pnl_amount, pnl_pct, outcome, hit_take_profit, hit_stop_loss, exited_early, feedback_tags, notes)\nVALUES (\n  '{{ $('Calculate P&L').first().json.session_date }}',\n  {{ $json.id ? $json.id : 'NULL' }},\n  '{{ $('Calculate P&L').first().json.ticker }}',\n  {{ $('Calculate P&L').first().json.buy_price }},\n  {{ $('Calculate P&L').first().json.sell_price }},\n  {{ $('Calculate P&L').first().json.quantity }},\n  {{ $('Calculate P&L').first().json.pnl_amount }},\n  {{ $('Calculate P&L').first().json.pnl_pct }},\n  '{{ $('Calculate P&L').first().json.outcome }}',\n  {{ $('Calculate P&L').first().json.hit_take_profit }},\n  {{ $('Calculate P&L').first().json.hit_stop_loss }},\n  {{ $('Calculate P&L').first().json.exited_early }},\n  '{{ $('Calculate P&L').first().json.feedback_tags.replace(/'/g, \"''\") }}',\n  '{{ $('Calculate P&L').first().json.notes.replace(/'/g, \"''\") }}'\n)",
         "options": {}
       },
       "id": "d1b2c3d4-0004-0001-0001-000000000004",
@@ -50,6 +64,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [960, 300],
+      "onError": "continueRegularOutput",
       "credentials": {
         "postgres": {
           "id": "",

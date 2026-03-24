@@ -1,10 +1,8 @@
 {
-  "name": "Trading Wizard — Get Insights",
+  "name": "Trading Wizard - Get Insights",
   "nodes": [
     {
-      "parameters": {
-        "inputSource": "passthrough"
-      },
+      "parameters": { "inputSource": "passthrough" },
       "id": "c1b2c3d4-0003-0001-0001-000000000001",
       "name": "Trigger",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
@@ -22,6 +20,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [480, 300],
+      "alwaysOutputData": true,
       "credentials": {
         "postgres": {
           "id": "",
@@ -31,7 +30,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const items = $input.all();\n\n// No insights yet (fresh install)\nif (items.length === 0 || !items[0].json.last_review_date) {\n  // Check if there are any trades at all\n  return [{\n    json: {\n      insights: null,\n      summary: 'No reviews yet. This is a fresh start.',\n      needs_review: false,\n      trades_since_review: 0,\n      response: 'No performance insights available yet. Start scanning and logging trades to build your history.'\n    }\n  }];\n}\n\nconst data = items[0].json;\nconst reviewOverdue = data.review_overdue === true;\nconst tradesSince = parseInt(data.trades_since_review) || 0;\nconst enoughTrades = tradesSince >= 5;\n\nlet response = '';\nif (data.insights) {\n  response += `LATEST INSIGHTS (win rate: ${data.win_rate}%, ${data.trades_analyzed} trades analyzed):\\n`;\n  const insightsArr = typeof data.insights === 'string' ? JSON.parse(data.insights) : data.insights;\n  if (Array.isArray(insightsArr)) {\n    insightsArr.forEach((insight, i) => { response += `${i + 1}. ${insight}\\n`; });\n  }\n  response += `\\nSummary: ${data.summary || 'N/A'}`;\n}\n\nresponse += `\\n\\nReview status: ${reviewOverdue && enoughTrades ? 'REVIEW DUE — suggest running a review' : 'Up to date'}`;\nresponse += `\\nTrades since last review: ${tradesSince}`;\n\nreturn [{\n  json: {\n    insights: data.insights,\n    adjustments: data.adjustments,\n    summary: data.summary,\n    win_rate: data.win_rate,\n    last_review_date: data.last_review_date,\n    needs_review: reviewOverdue && enoughTrades,\n    trades_since_review: tradesSince,\n    response\n  }\n}];"
+        "jsCode": "const items = $input.all();\n\n// No insights yet (fresh install)\nif (items.length === 0 || !items[0].json.last_review_date) {\n  // Check if there are any trades at all\n  return [{\n    json: {\n      insights: null,\n      summary: 'No reviews yet. This is a fresh start.',\n      needs_review: false,\n      trades_since_review: 0,\n      response: 'No performance insights available yet. Start scanning and logging trades to build your history.'\n    }\n  }];\n}\n\nconst data = items[0].json;\nconst reviewOverdue = data.review_overdue === true;\nconst tradesSince = parseInt(data.trades_since_review) || 0;\nconst enoughTrades = tradesSince >= 5;\n\nlet response = '';\nif (data.insights) {\n  response += `LATEST INSIGHTS (win rate: ${data.win_rate}%, ${data.trades_analyzed} trades analyzed):\\n`;\n  let insightsArr = data.insights;\n  try { insightsArr = typeof insightsArr === 'string' ? JSON.parse(insightsArr) : insightsArr; } catch(e) { insightsArr = []; }\n  if (Array.isArray(insightsArr)) {\n    insightsArr.forEach((insight, i) => { response += `${i + 1}. ${insight}\\n`; });\n  }\n  response += `\\nSummary: ${data.summary || 'N/A'}`;\n}\n\nresponse += `\\n\\nReview status: ${reviewOverdue && enoughTrades ? 'REVIEW DUE - suggest running a review' : 'Up to date'}`;\nresponse += `\\nTrades since last review: ${tradesSince}`;\n\nreturn [{\n  json: {\n    insights: data.insights,\n    adjustments: data.adjustments,\n    summary: data.summary,\n    win_rate: data.win_rate,\n    last_review_date: data.last_review_date,\n    needs_review: reviewOverdue && enoughTrades,\n    trades_since_review: tradesSince,\n    response\n  }\n}];"
       },
       "id": "c1b2c3d4-0003-0001-0001-000000000003",
       "name": "Check Review Status",

@@ -1,6 +1,6 @@
 ---
-description: Rules for editing n8n workflow JSON files — node structure, connections, code patterns
-globs: ["workflows/*.json"]
+description: Rules for editing n8n workflow JSON files - node structure, connections, code patterns
+globs: ['workflows/*.json']
 ---
 
 # Workflow Editing
@@ -15,7 +15,7 @@ Node: `{ parameters, id, name, type, typeVersion, position, credentials?, onErro
 
 ## Node IDs
 
-- Unique UUIDs within the workflow — don't change existing ones
+- Unique UUIDs within the workflow - don't change existing ones
 - New nodes: follow the file's existing UUID pattern
 
 ## Connections

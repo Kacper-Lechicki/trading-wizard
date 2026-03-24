@@ -1,6 +1,7 @@
 Scan all tracked files in this repository for security issues.
 
 Check for:
+
 1. Hardcoded API keys, passwords, or tokens (anything that looks like a real secret, not a placeholder like `YOUR_FMP_KEY` or `CHANGE_ME_...`)
 2. `.env` file accidentally staged for commit
 3. SQL injection vectors in workflow JSON files (string interpolation in SQL queries without sanitization)

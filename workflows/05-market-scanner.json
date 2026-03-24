@@ -1,8 +1,18 @@
 {
-  "name": "Trading Wizard — Market Scanner",
+  "name": "Trading Wizard - Market Scanner",
   "nodes": [
     {
-      "parameters": {"inputSource": "passthrough"},
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            { "name": "budget", "type": "number" },
+            { "name": "currency", "type": "string" },
+            { "name": "market", "type": "string" },
+            { "name": "fractional_shares", "type": "boolean" }
+          ]
+        }
+      },
       "id": "e0000001-0001-0001-0001-000000000001",
       "name": "Trigger",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
@@ -13,7 +23,7 @@
       "parameters": {
         "method": "GET",
         "url": "=https://financialmodelingprep.com/stable/biggest-gainers?apikey=YOUR_FMP_KEY",
-        "options": {"timeout": 10000}
+        "options": { "timeout": 10000 }
       },
       "id": "e0000001-0001-0001-0001-000000000002",
       "name": "FMP Gainers",
@@ -26,7 +36,7 @@
       "parameters": {
         "method": "GET",
         "url": "=https://financialmodelingprep.com/stable/most-actives?apikey=YOUR_FMP_KEY",
-        "options": {"timeout": 10000}
+        "options": { "timeout": 10000 }
       },
       "id": "e0000001-0001-0001-0001-000000000003",
       "name": "FMP Most Active",
@@ -39,7 +49,7 @@
       "parameters": {
         "method": "GET",
         "url": "=https://financialmodelingprep.com/stable/biggest-losers?apikey=YOUR_FMP_KEY",
-        "options": {"timeout": 10000}
+        "options": { "timeout": 10000 }
       },
       "id": "e0000001-0001-0001-0001-000000000004",
       "name": "FMP Losers",
@@ -50,7 +60,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const all = $input.all().map(i => i.json).flat().filter(x => x && typeof x === 'object');\nconst seen = new Set();\nconst unique = all.filter(stock => {\n  if (!stock || !stock.symbol || seen.has(stock.symbol)) return false;\n  seen.add(stock.symbol);\n  return true;\n});\nreturn unique.map(stock => ({ json: stock }));"
+        "jsCode": "const all = $input.all().map(i => i.json).flat().filter(x => x && typeof x === 'object' && !x.error && !x.errorMessage);\nconst seen = new Set();\nconst unique = all.filter(stock => {\n  if (!stock || !stock.symbol || seen.has(stock.symbol)) return false;\n  seen.add(stock.symbol);\n  return true;\n});\nif (unique.length === 0) {\n  return [{ json: { _fmp_empty: true, symbol: '_NEWS_ONLY_', price: 0 } }];\n}\nreturn unique.map(stock => ({ json: stock }));"
       },
       "id": "e0000001-0001-0001-0001-000000000005",
       "name": "Merge & Deduplicate",
@@ -60,7 +70,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const items = $input.all();\nconst budget = $('Trigger').first().json.budget || 1000;\nconst market = ($('Trigger').first().json.market || 'BOTH').toUpperCase();\n\nconst filtered = items.filter(item => {\n  const s = item.json;\n  if (!s.symbol || !s.price) return false;\n  if (s.price < 1) return false;\n  if (s.price > budget * 0.3) return false;\n  if (s.exchange && s.exchange.includes('OTC')) return false;\n  if (market === 'US' && s.symbol.includes('.')) return false;\n  if (market === 'EU' && !s.symbol.includes('.')) return false;\n  return true;\n});\n\nconst sorted = filtered.sort((a, b) =>\n  Math.abs(b.json.changesPercentage || 0) - Math.abs(a.json.changesPercentage || 0)\n);\n\nreturn sorted.slice(0, 10);"
+        "jsCode": "const items = $input.all();\n\n// FMP unavailable - pass through marker so pipeline continues with news only\nif (items.length === 1 && items[0].json._fmp_empty) {\n  return [{ json: { _fmp_empty: true } }];\n}\n\nconst budget = $('Trigger').first().json.budget || 1000;\nconst market = ($('Trigger').first().json.market || 'BOTH').toUpperCase();\nconst fractionalShares = $('Trigger').first().json.fractional_shares !== false;\n\nif (budget <= 0) {\n  return [{ json: { error: true, response: 'Budget must be greater than 0.' } }];\n}\n\nconst filtered = items.filter(item => {\n  const s = item.json;\n  if (!s.symbol || !s.price) return false;\n  if (s.price < 1) return false;\n  if (!fractionalShares && s.price > budget * 0.3) return false;\n  if (s.exchange && s.exchange.includes('OTC')) return false;\n  if (market === 'US' && s.symbol.includes('.')) return false;\n  if (market === 'EU' && !s.symbol.includes('.')) return false;\n  return true;\n});\n\nif (filtered.length === 0) {\n  return [{ json: { _fmp_empty: true } }];\n}\n\nconst sorted = filtered.sort((a, b) =>\n  Math.abs(b.json.changesPercentage || 0) - Math.abs(a.json.changesPercentage || 0)\n);\n\nreturn sorted.slice(0, 10);"
       },
       "id": "e0000001-0001-0001-0001-000000000006",
       "name": "Filter Candidates",
@@ -70,7 +80,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const symbols = $input.all().map(i => i.json.symbol).filter(Boolean);\nreturn [{ json: { symbols: symbols.join(','), symbolList: symbols, candidates: $input.all().map(i => i.json) } }];"
+        "jsCode": "const first = $input.first().json;\nif (first.error) {\n  return [{ json: first }];\n}\nif (first._fmp_empty) {\n  return [{ json: { _fmp_empty: true, symbols: '', symbolList: [], candidates: [] } }];\n}\nconst symbols = $input.all().map(i => i.json.symbol).filter(Boolean);\nreturn [{ json: { symbols: symbols.join(','), symbolList: symbols, candidates: $input.all().map(i => i.json) } }];"
       },
       "id": "e0000001-0001-0001-0001-000000000007",
       "name": "Build Symbol List",
@@ -82,7 +92,7 @@
       "parameters": {
         "method": "GET",
         "url": "=https://financialmodelingprep.com/stable/quote?symbol={{ $json.symbols }}&apikey=YOUR_FMP_KEY",
-        "options": {"timeout": 15000}
+        "options": { "timeout": 15000 }
       },
       "id": "e0000001-0001-0001-0001-000000000008",
       "name": "FMP Batch Quote",
@@ -95,7 +105,7 @@
       "parameters": {
         "method": "GET",
         "url": "=https://financialmodelingprep.com/stable/earnings-calendar?from={{ $now.format('yyyy-MM-dd') }}&to={{ $now.plus(2, 'days').format('yyyy-MM-dd') }}&apikey=YOUR_FMP_KEY",
-        "options": {"timeout": 10000}
+        "options": { "timeout": 10000 }
       },
       "id": "e0000001-0001-0001-0001-000000000009",
       "name": "FMP Earnings Check",
@@ -106,7 +116,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Resilient merge — works even if Batch Quote and Earnings Check failed\nconst candidates = $('Filter Candidates').all().map(i => i.json);\n\nlet earningsTickers = new Set();\ntry {\n  const earningsRaw = $('FMP Earnings Check').all();\n  if (earningsRaw && earningsRaw.length > 0) {\n    const data = earningsRaw.map(e => e.json).flat();\n    (Array.isArray(data) ? data : []).forEach(e => {\n      if (e && e.symbol) earningsTickers.add(e.symbol);\n    });\n  }\n} catch (e) {}\n\n// Try to enrich with batch quote data\nlet quoteMap = {};\ntry {\n  const quotes = $('FMP Batch Quote').all().map(i => i.json).flat();\n  if (Array.isArray(quotes)) {\n    quotes.forEach(q => { if (q && q.symbol) quoteMap[q.symbol] = q; });\n  }\n} catch (e) {}\n\nreturn candidates.map(c => {\n  const enriched = quoteMap[c.symbol] || {};\n  return {\n    json: {\n      ...c,\n      ...enriched,\n      symbol: c.symbol,\n      earnings_within_48h: earningsTickers.has(c.symbol),\n    }\n  };\n});"
+        "jsCode": "// Pass through markers\nconst firstCandidate = $('Filter Candidates').first().json;\nif (firstCandidate.error) {\n  return [{ json: firstCandidate }];\n}\nif (firstCandidate._fmp_empty) {\n  return [{ json: { _fmp_empty: true } }];\n}\n\n// Resilient merge - works even if Batch Quote and Earnings Check failed\nconst candidates = $('Filter Candidates').all().map(i => i.json);\n\nlet earningsTickers = new Set();\ntry {\n  const earningsRaw = $('FMP Earnings Check').all();\n  if (earningsRaw && earningsRaw.length > 0) {\n    const data = earningsRaw.map(e => e.json).flat();\n    (Array.isArray(data) ? data : []).forEach(e => {\n      if (e && e.symbol) earningsTickers.add(e.symbol);\n    });\n  }\n} catch (e) {}\n\n// Try to enrich with batch quote data\nlet quoteMap = {};\ntry {\n  const quotes = $('FMP Batch Quote').all().map(i => i.json).flat();\n  if (Array.isArray(quotes)) {\n    quotes.forEach(q => { if (q && q.symbol) quoteMap[q.symbol] = q; });\n  }\n} catch (e) {}\n\nreturn candidates.map(c => {\n  const enriched = quoteMap[c.symbol] || {};\n  return {\n    json: {\n      ...c,\n      ...enriched,\n      symbol: c.symbol,\n      earnings_within_48h: earningsTickers.has(c.symbol),\n    }\n  };\n});"
       },
       "id": "e0000001-0001-0001-0001-000000000010",
       "name": "Merge Quote Data",
@@ -116,7 +126,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const items = $input.all();\nconst top10 = items.slice(0, 10).map(i => i.json.symbol).filter(Boolean);\nreturn [{ json: { tickers: top10.join(','), tickerList: top10, allCandidates: items.map(i => i.json) } }];"
+        "jsCode": "const first = $input.first().json;\nif (first.error) {\n  return [{ json: first }];\n}\nif (first._fmp_empty) {\n  // No FMP data - use general market tickers for news search\n  const fallbackTickers = ['SPY','QQQ','AAPL','MSFT','TSLA'];\n  return [{ json: { _fmp_empty: true, tickers: fallbackTickers.join(','), tickerList: fallbackTickers, allCandidates: [] } }];\n}\nconst items = $input.all();\nconst top10 = items.slice(0, 10).map(i => i.json.symbol).filter(Boolean);\nreturn [{ json: { tickers: top10.join(','), tickerList: top10, allCandidates: items.map(i => i.json) } }];"
       },
       "id": "e0000001-0001-0001-0001-000000000011",
       "name": "Select Top 10 for News",
@@ -128,7 +138,7 @@
       "parameters": {
         "method": "GET",
         "url": "=https://financialmodelingprep.com/stable/news/stock?tickers={{ $json.tickers }}&limit=50&apikey=YOUR_FMP_KEY",
-        "options": {"timeout": 10000}
+        "options": { "timeout": 10000 }
       },
       "id": "e0000001-0001-0001-0001-000000000012",
       "name": "FMP News",
@@ -150,7 +160,20 @@
     },
     {
       "parameters": {
-        "jsCode": "// Resilient news merge — works even if some sources failed\nconst candidates = $('Merge Quote Data').all().map(i => i.json);\nconst newsByTicker = {};\n\ntry {\n  const fmpNews = $('FMP News').all().map(i => i.json).flat();\n  const fmpArray = Array.isArray(fmpNews) ? fmpNews : [fmpNews];\n  for (const n of fmpArray) {\n    if (!n || !n.symbol) continue;\n    if (!newsByTicker[n.symbol]) newsByTicker[n.symbol] = [];\n    newsByTicker[n.symbol].push({ title: n.title || '', summary: n.text || '', source: n.site || 'FMP' });\n  }\n} catch (e) {}\n\ntry {\n  const googleNews = $('Google News RSS').all().map(i => i.json);\n  for (const n of googleNews) {\n    if (!n || !n.title) continue;\n    if (!newsByTicker['GENERAL']) newsByTicker['GENERAL'] = [];\n    newsByTicker['GENERAL'].push({ title: n.title || '', summary: n.contentSnippet || '', source: 'Google News' });\n  }\n} catch (e) {}\n\nfor (const ticker of Object.keys(newsByTicker)) {\n  newsByTicker[ticker] = newsByTicker[ticker].slice(0, 5);\n}\n\nreturn [{ json: { newsByTicker, candidates } }];"
+        "method": "GET",
+        "url": "=https://finnhub.io/api/v1/company-news?symbol={{ $('Select Top 10 for News').first().json.tickerList[0] }}&from={{ $now.minus(3, 'days').format('yyyy-MM-dd') }}&to={{ $now.format('yyyy-MM-dd') }}&token=YOUR_FINNHUB_KEY",
+        "options": { "timeout": 10000 }
+      },
+      "id": "e0000001-0001-0001-0001-000000000020",
+      "name": "Finnhub News",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2180, 700],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pass through hard errors only\nconst firstItem = $('Merge Quote Data').first().json;\nif (firstItem.error) {\n  return [{ json: firstItem }];\n}\n\nconst fmpEmpty = firstItem._fmp_empty || false;\n\n// Resilient news merge - works even if some sources failed\nconst candidates = $('Merge Quote Data').all().map(i => i.json);\nconst newsByTicker = {};\n\ntry {\n  const fmpNews = $('FMP News').all().map(i => i.json).flat();\n  const fmpArray = Array.isArray(fmpNews) ? fmpNews : [fmpNews];\n  for (const n of fmpArray) {\n    if (!n || !n.symbol) continue;\n    if (!newsByTicker[n.symbol]) newsByTicker[n.symbol] = [];\n    newsByTicker[n.symbol].push({ title: n.title || '', summary: n.text || '', source: n.site || 'FMP' });\n  }\n} catch (e) {}\n\ntry {\n  const googleNews = $('Google News RSS').all().map(i => i.json);\n  for (const n of googleNews) {\n    if (!n || !n.title) continue;\n    if (!newsByTicker['GENERAL']) newsByTicker['GENERAL'] = [];\n    newsByTicker['GENERAL'].push({ title: n.title || '', summary: n.contentSnippet || '', source: 'Google News' });\n  }\n} catch (e) {}\n\ntry {\n  const finnhubNews = $('Finnhub News').all().map(i => i.json).flat();\n  const finnhubArray = Array.isArray(finnhubNews) ? finnhubNews : [finnhubNews];\n  for (const n of finnhubArray) {\n    if (!n || !n.headline) continue;\n    const ticker = n.related || 'GENERAL';\n    if (!newsByTicker[ticker]) newsByTicker[ticker] = [];\n    newsByTicker[ticker].push({ title: n.headline || '', summary: n.summary || '', source: n.source || 'Finnhub' });\n  }\n} catch (e) {}\n\nfor (const ticker of Object.keys(newsByTicker)) {\n  newsByTicker[ticker] = newsByTicker[ticker].slice(0, 5);\n}\n\nreturn [{ json: { newsByTicker, candidates: fmpEmpty ? [] : candidates, _fmp_empty: fmpEmpty } }];"
       },
       "id": "e0000001-0001-0001-0001-000000000014",
       "name": "Merge News",
@@ -171,12 +194,12 @@
       "position": [2660, 400],
       "alwaysOutputData": true,
       "credentials": {
-        "postgres": {"id": "", "name": "Trading Wizard DB"}
+        "postgres": { "id": "", "name": "Trading Wizard DB" }
       }
     },
     {
       "parameters": {
-        "jsCode": "const trigger = $('Trigger').first().json;\nconst budget = trigger.budget || 1000;\nconst currency = trigger.currency || 'USD';\nconst newsData = $('Merge News').first().json.newsByTicker || {};\nconst candidates = $('Merge News').first().json.candidates || [];\n\nconst insightsNode = $('Load Insights').all();\nconst insights = insightsNode.length > 0 && insightsNode[0].json.insights\n  ? JSON.stringify(insightsNode[0].json.insights)\n  : 'No data from previous sessions yet.';\n\nconst today = new Date().toISOString().split('T')[0];\n\nconst tickerData = candidates.map(c => ({\n  symbol: c.symbol,\n  name: c.name || c.companyName || c.symbol,\n  price: c.price,\n  change_pct: c.changesPercentage || 0,\n  dayHigh: c.dayHigh,\n  dayLow: c.dayLow,\n  volume: c.volume,\n  avgVolume: c.avgVolume,\n  marketCap: c.marketCap,\n  pe: c.pe,\n  earnings_within_48h: c.earnings_within_48h || false,\n  news: (newsData[c.symbol] || []).concat((newsData['GENERAL'] || []).slice(0, 2)),\n}));\n\nconst systemPrompt = `You are a professional intraday stock analyst.\nDate: ${today}. Session budget: ${budget} ${currency}.\n\nYOUR TASK: Analyze the stocks below and select the best intraday opportunities.\nFor each stock, decide: BUY or SKIP.\n\nBUY SIGNAL RULES:\n- Risk/Reward >= 1.5\n- Confidence >= 60%\n- Clear catalyst must exist (news, technical indicator, volume)\n- No conflicting signals\n- Maximum 3 BUY signals per session\n- Maximum 30% of budget per single position\n- Take-profit: nearest technical resistance\n- Stop-loss: below nearest support\n- If a stock reports earnings within 48h: REDUCE confidence by 20 points, add earnings_proximity to risk_warnings\n\nRISK DISCLOSURE (MANDATORY FOR EVERY BUY SIGNAL):\nYou MUST calculate and include for every BUY:\n- estimated_cost: suggested_shares * midpoint of entry range\n- upside_pct: percentage gain if take-profit hit\n- downside_pct: percentage loss if stop-loss hit (negative number)\n- risk_reward: abs(upside_pct / downside_pct)\n- potential_profit: dollar gain if take-profit hit\n- potential_loss: dollar loss if stop-loss hit (negative number)\n- risk_warnings: array of any warnings\n- risk_level: low/moderate/high\n\nEDUCATIONAL REQUIREMENT:\nFor EVERY signal, include a plain-language explanation.\nWrite reasoning and educational_note in the user's language (Polish by default).\nKeep reasoning under 100 words and educational_note under 60 words.\n\nLESSONS FROM PREVIOUS SESSIONS:\n${insights}\n\nRESPOND WITH VALID JSON ONLY. Be concise to fit within token limits:\n{\n  \"signals\": [\n    {\n      \"ticker\": \"AAPL\",\n      \"company_name\": \"Apple Inc.\",\n      \"market\": \"US\",\n      \"type\": \"BUY\",\n      \"confidence\": 75,\n      \"entry_low\": 185.20,\n      \"entry_high\": 185.60,\n      \"take_profit\": 187.40,\n      \"stop_loss\": 184.10,\n      \"suggested_shares\": 5,\n      \"estimated_cost\": 927.00,\n      \"upside_pct\": 1.08,\n      \"downside_pct\": -0.70,\n      \"risk_reward\": 1.54,\n      \"potential_profit\": 9.00,\n      \"potential_loss\": -6.50,\n      \"risk_level\": \"moderate\",\n      \"risk_warnings\": [],\n      \"reasoning\": \"Short reasoning in user language\",\n      \"catalysts\": [\"Strong volume\"],\n      \"educational_note\": \"Short lesson in user language\",\n      \"is_top_pick\": true\n    }\n  ],\n  \"market_summary\": \"Brief summary.\"\n}`;\n\nconst userPrompt = `CANDIDATE DATA:\\n${JSON.stringify(tickerData, null, 2)}`;\n\nreturn [{ json: { systemPrompt, userPrompt, budget, currency } }];"
+        "jsCode": "const mergeResult = $('Merge News').first().json;\nif (mergeResult.error) {\n  return [{ json: mergeResult }];\n}\n\nconst trigger = $('Trigger').first().json;\nconst budget = trigger.budget || 1000;\nconst currency = trigger.currency || 'USD';\nconst fractionalShares = trigger.fractional_shares !== false;\nconst newsData = mergeResult.newsByTicker || {};\nconst candidates = mergeResult.candidates || [];\nconst fmpEmpty = mergeResult._fmp_empty || false;\n\nconst insightsNode = $('Load Insights').all();\nconst insights = insightsNode.length > 0 && insightsNode[0].json.insights\n  ? JSON.stringify(insightsNode[0].json.insights)\n  : 'No data from previous sessions yet.';\n\nconst today = new Date().toISOString().split('T')[0];\n\nconst tickerData = candidates.map(c => ({\n  symbol: c.symbol,\n  name: c.name || c.companyName || c.symbol,\n  price: c.price,\n  change_pct: c.changesPercentage || 0,\n  dayHigh: c.dayHigh,\n  dayLow: c.dayLow,\n  volume: c.volume,\n  avgVolume: c.avgVolume,\n  marketCap: c.marketCap,\n  pe: c.pe,\n  earnings_within_48h: c.earnings_within_48h || false,\n  news: (newsData[c.symbol] || []).concat((newsData['GENERAL'] || []).slice(0, 2)),\n}));\n\nconst systemPrompt = `You are a professional stock analyst specializing in intraday and short-term swing trades.\nDate: ${today}. Session budget: ${budget} ${currency}. Fractional shares: ${fractionalShares ? 'YES (broker supports buying partial shares, e.g. 0.5 shares)' : 'NO (whole shares only)'}.\n\nYOUR TASK: Analyze the stocks below and select the best trading opportunities.\nFor each stock, decide: BUY or SKIP.\nFor each BUY, classify as INTRADAY or SWING.\n\nTRADE TYPE CLASSIFICATION:\n- \"intraday\" - open and close same trading day. Tighter TP/SL based on intraday levels.\n- \"swing\" - hold 2-5 business days. Wider TP/SL based on multi-day support/resistance.\nChoose based on:\n- Stock volatility and momentum pattern (high intraday move = intraday candidate)\n- Budget constraints (small budget + expensive stock = swing with fractional shares may be better)\n- News catalysts (upcoming event in 2-3 days = swing to capture it)\n- Volume profile (sustained volume over days = swing candidate)\n\nBUDGET GUIDANCE:\nNEVER reject a scan because the budget is \"too small.\" Every budget has opportunities:\n- $25-50: Focus on stocks $1-10. ${fractionalShares ? 'Use fractional shares for pricier stocks.' : 'Stick to stocks within budget.'} Be honest about expected $ returns.\n- $50-200: Wider selection. Mix of low-price stocks ${fractionalShares ? 'and fractional positions in quality stocks' : ''}.\n- $200+: Full range available.\nAlways be honest about realistic expectations. For a $25 budget, a 2% gain is $0.50 - say this clearly.\nBut also explain: the value is in learning, building discipline, and gaining real market experience.\n${fractionalShares ? 'FRACTIONAL SHARES: You may suggest fractional quantities (e.g., 0.5 shares of a $40 stock for a $20 position). Calculate all costs and P&L accordingly.' : ''}\n\nBUY SIGNAL RULES:\n- Risk/Reward >= 1.5\n- Confidence >= 60%\n- Clear catalyst must exist (news, technical indicator, volume)\n- No conflicting signals\n- Maximum 3 BUY signals per session\n- Maximum 30% of budget per single position\n- Take-profit: nearest technical resistance (intraday: tighter, swing: wider)\n- Stop-loss: below nearest support (intraday: tighter, swing: wider)\n- If a stock reports earnings within 48h: REDUCE confidence by 20 points, add earnings_proximity to risk_warnings\n\nRISK DISCLOSURE (MANDATORY FOR EVERY BUY SIGNAL):\nYou MUST calculate and include for every BUY:\n- estimated_cost: suggested_shares * midpoint of entry range\n- upside_pct: percentage gain if take-profit hit\n- downside_pct: percentage loss if stop-loss hit (negative number)\n- risk_reward: abs(upside_pct / downside_pct)\n- potential_profit: dollar gain if take-profit hit\n- potential_loss: dollar loss if stop-loss hit (negative number)\n- risk_warnings: array of any warnings\n- risk_level: low/moderate/high\n\nEDUCATIONAL REQUIREMENT:\nFor EVERY signal, include a plain-language explanation.\nWrite reasoning and educational_note in the user's language (Polish by default).\nKeep reasoning under 100 words and educational_note under 60 words.\nFor swing trades, mention overnight risk in the educational note.\n\nLESSONS FROM PREVIOUS SESSIONS:\n${insights}\n\nRESPOND WITH VALID JSON ONLY. Be concise to fit within token limits:\n{\n  \"signals\": [\n    {\n      \"ticker\": \"AAPL\",\n      \"company_name\": \"Apple Inc.\",\n      \"market\": \"US\",\n      \"type\": \"BUY\",\n      \"trade_type\": \"intraday\",\n      \"suggested_holding\": \"same_day\",\n      \"confidence\": 75,\n      \"entry_low\": 185.20,\n      \"entry_high\": 185.60,\n      \"take_profit\": 187.40,\n      \"stop_loss\": 184.10,\n      \"suggested_shares\": 0.5,\n      \"estimated_cost\": 92.70,\n      \"upside_pct\": 1.08,\n      \"downside_pct\": -0.70,\n      \"risk_reward\": 1.54,\n      \"potential_profit\": 0.90,\n      \"potential_loss\": -0.65,\n      \"risk_level\": \"moderate\",\n      \"risk_warnings\": [],\n      \"reasoning\": \"Short reasoning in user language\",\n      \"catalysts\": [\"Strong volume\"],\n      \"educational_note\": \"Short lesson in user language\",\n      \"is_top_pick\": true\n    }\n  ],\n  \"market_summary\": \"Brief summary.\"\n}`;\n\nlet userPrompt;\nif (fmpEmpty) {\n  const allNews = Object.entries(newsData).map(([ticker, articles]) => ({ ticker, articles }));\n  userPrompt = `FMP MARKET DATA UNAVAILABLE (API limit reached). Use the news below to identify trading opportunities. Research current prices from your knowledge.\\n\\nNEWS DATA:\\n${JSON.stringify(allNews, null, 2)}`;\n} else {\n  userPrompt = `CANDIDATE DATA:\\n${JSON.stringify(tickerData, null, 2)}`;\n}\n\nreturn [{ json: { systemPrompt, userPrompt, budget, currency, fractionalShares } }];"
       },
       "id": "e0000001-0001-0001-0001-000000000016",
       "name": "Build AI Prompt",
@@ -191,25 +214,26 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {"name": "Authorization", "value": "=Bearer YOUR_OPENROUTER_KEY"},
-            {"name": "Content-Type", "value": "application/json"},
-            {"name": "HTTP-Referer", "value": "http://localhost:5678"}
+            { "name": "Authorization", "value": "=Bearer YOUR_OPENROUTER_KEY" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "HTTP-Referer", "value": "http://localhost:5678" }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"google/gemini-2.0-flash\",\n  \"temperature\": 0.2,\n  \"max_tokens\": 8192,\n  \"response_format\": { \"type\": \"json_object\" },\n  \"messages\": [\n    { \"role\": \"system\", \"content\": {{ JSON.stringify($json.systemPrompt) }} },\n    { \"role\": \"user\", \"content\": {{ JSON.stringify($json.userPrompt) }} }\n  ]\n}",
-        "options": {"timeout": 120000}
+        "jsonBody": "={\n  \"model\": \"google/gemini-2.5-flash\",\n  \"temperature\": 0.3,\n  \"max_tokens\": 8192,\n  \"response_format\": { \"type\": \"json_object\" },\n  \"messages\": [\n    { \"role\": \"system\", \"content\": {{ JSON.stringify($json.systemPrompt) }} },\n    { \"role\": \"user\", \"content\": {{ JSON.stringify($json.userPrompt) }} }\n  ]\n}",
+        "options": { "timeout": 120000 }
       },
       "id": "e0000001-0001-0001-0001-000000000017",
       "name": "AI Analysis",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [3140, 400]
+      "position": [3140, 400],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "jsCode": "const response = $input.first().json;\nconst budget = $('Build AI Prompt').first().json.budget;\n\nlet content = response.choices?.[0]?.message?.content || '';\ncontent = content.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(content);\n} catch (e) {\n  return [{ json: { error: true, response: 'AI returned invalid JSON. Please try scanning again.' } }];\n}\n\nif (!parsed.signals || !Array.isArray(parsed.signals)) {\n  return [{ json: { error: true, response: 'AI response missing signals array.' } }];\n}\n\nconst validSignals = parsed.signals.map(signal => {\n  if (!signal.ticker || !signal.type) return null;\n\n  if (signal.type === 'BUY') {\n    if ((signal.confidence || 0) < 60) {\n      signal.type = 'SKIP';\n      signal.reasoning = '[Auto-downgraded: confidence ' + signal.confidence + '% < 60%] ' + (signal.reasoning || '');\n    }\n    if ((signal.risk_reward || 0) < 1.5 && signal.type === 'BUY') {\n      signal.type = 'SKIP';\n      signal.reasoning = '[Auto-downgraded: R/R ' + signal.risk_reward + ' < 1.5] ' + (signal.reasoning || '');\n    }\n  }\n\n  if (signal.type === 'BUY') {\n    const entryMid = ((signal.entry_low || 0) + (signal.entry_high || 0)) / 2;\n    if (!signal.suggested_shares && entryMid > 0) {\n      signal.suggested_shares = Math.floor((budget * 0.3) / entryMid);\n      signal.estimated_cost = Math.round(signal.suggested_shares * entryMid * 100) / 100;\n    }\n    if (!signal.potential_profit && signal.take_profit && entryMid > 0) {\n      signal.potential_profit = Math.round((signal.take_profit - entryMid) * (signal.suggested_shares || 1) * 100) / 100;\n    }\n    if (!signal.potential_loss && signal.stop_loss && entryMid > 0) {\n      signal.potential_loss = Math.round((signal.stop_loss - entryMid) * (signal.suggested_shares || 1) * 100) / 100;\n    }\n    if (!signal.risk_level) {\n      if (signal.risk_reward > 2.5 && signal.confidence > 80) signal.risk_level = 'low';\n      else if (signal.risk_reward > 1.5 && signal.confidence > 65) signal.risk_level = 'moderate';\n      else signal.risk_level = 'high';\n    }\n    if (!signal.risk_warnings) signal.risk_warnings = [];\n  }\n\n  return { ...signal, session_date: new Date().toISOString().split('T')[0], session_budget: budget };\n}).filter(Boolean);\n\nconst buySignals = validSignals.filter(s => s.type === 'BUY').slice(0, 5);\nconst skipSignals = validSignals.filter(s => s.type === 'SKIP');\n\nreturn [{\n  json: {\n    signals: [...buySignals, ...skipSignals],\n    market_summary: parsed.market_summary || '',\n    buy_count: buySignals.length,\n    skip_count: skipSignals.length,\n    token_usage: response.usage || {},\n  }\n}];"
+        "jsCode": "// Early exit on hard errors only\nconst promptResult = $('Build AI Prompt').first().json;\nif (promptResult.error) {\n  return [{ json: promptResult }];\n}\n\nconst response = $input.first().json;\nconst budget = promptResult.budget;\nconst fractionalShares = promptResult.fractionalShares;\n\nlet content = response.choices?.[0]?.message?.content || '';\ncontent = content.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(content);\n} catch (e) {\n  return [{ json: { error: true, response: 'AI returned invalid JSON. Please try scanning again.' } }];\n}\n\nif (!parsed.signals || !Array.isArray(parsed.signals)) {\n  return [{ json: { error: true, response: 'AI response missing signals array.' } }];\n}\n\nconst validSignals = parsed.signals.map(signal => {\n  if (!signal.ticker || !signal.type) return null;\n\n  // Default new fields\n  if (!signal.trade_type) signal.trade_type = 'intraday';\n  if (!signal.suggested_holding) signal.suggested_holding = signal.trade_type === 'swing' ? '2-3 days' : 'same_day';\n\n  if (signal.type === 'BUY') {\n    if ((signal.confidence || 0) < 60) {\n      signal.type = 'SKIP';\n      signal.reasoning = '[Auto-downgraded: confidence ' + signal.confidence + '% < 60%] ' + (signal.reasoning || '');\n    }\n    if ((signal.risk_reward || 0) < 1.5 && signal.type === 'BUY') {\n      signal.type = 'SKIP';\n      signal.reasoning = '[Auto-downgraded: R/R ' + signal.risk_reward + ' < 1.5] ' + (signal.reasoning || '');\n    }\n  }\n\n  if (signal.type === 'BUY') {\n    const entryMid = ((signal.entry_low || 0) + (signal.entry_high || 0)) / 2;\n    if (!signal.suggested_shares && entryMid > 0) {\n      const maxPosition = budget * 0.3;\n      if (fractionalShares) {\n        signal.suggested_shares = Math.round((maxPosition / entryMid) * 10000) / 10000;\n      } else {\n        signal.suggested_shares = Math.floor(maxPosition / entryMid);\n      }\n      signal.estimated_cost = Math.round(signal.suggested_shares * entryMid * 100) / 100;\n    }\n    if (!signal.upside_pct && signal.take_profit && entryMid > 0) {\n      signal.upside_pct = Math.round(((signal.take_profit - entryMid) / entryMid) * 10000) / 100;\n    }\n    if (!signal.downside_pct && signal.stop_loss && entryMid > 0) {\n      signal.downside_pct = Math.round(((signal.stop_loss - entryMid) / entryMid) * 10000) / 100;\n    }\n    if (!signal.risk_reward && signal.upside_pct && signal.downside_pct) {\n      signal.risk_reward = Math.round(Math.abs(signal.upside_pct / signal.downside_pct) * 100) / 100;\n    }\n    if (!signal.potential_profit && signal.take_profit && entryMid > 0) {\n      signal.potential_profit = Math.round((signal.take_profit - entryMid) * (signal.suggested_shares || 1) * 100) / 100;\n    }\n    if (!signal.potential_loss && signal.stop_loss && entryMid > 0) {\n      signal.potential_loss = Math.round((signal.stop_loss - entryMid) * (signal.suggested_shares || 1) * 100) / 100;\n    }\n    if (!signal.risk_level) {\n      if (signal.risk_reward > 2.5 && signal.confidence > 80) signal.risk_level = 'low';\n      else if (signal.risk_reward > 1.5 && signal.confidence > 65) signal.risk_level = 'moderate';\n      else signal.risk_level = 'high';\n    }\n    if (!signal.risk_warnings) signal.risk_warnings = [];\n  }\n\n  return { ...signal, session_date: new Date().toISOString().split('T')[0], session_budget: budget };\n}).filter(Boolean);\n\nconst buySignals = validSignals.filter(s => s.type === 'BUY').slice(0, 5);\nconst skipSignals = validSignals.filter(s => s.type === 'SKIP');\n\nreturn [{\n  json: {\n    signals: [...buySignals, ...skipSignals],\n    market_summary: parsed.market_summary || '',\n    buy_count: buySignals.length,\n    skip_count: skipSignals.length,\n    token_usage: response.usage || {},\n  }\n}];"
       },
       "id": "e0000001-0001-0001-0001-000000000018",
       "name": "Validate & Enrich",
@@ -219,47 +243,106 @@
     },
     {
       "parameters": {
-        "jsCode": "const data = $input.first().json;\n\nif (data.error) {\n  return [{ json: { response: data.response } }];\n}\n\nlet response = `MARKET SUMMARY: ${data.market_summary}\\n\\n`;\nresponse += `Found ${data.buy_count} BUY signals and ${data.skip_count} SKIP.\\n\\n`;\n\nconst buySignals = data.signals.filter(s => s.type === 'BUY');\nconst skipSignals = data.signals.filter(s => s.type === 'SKIP');\n\nif (buySignals.length > 0) {\n  response += '=== BUY SIGNALS ===\\n\\n';\n  for (const s of buySignals) {\n    response += `TICKER: ${s.ticker} (${s.company_name || s.ticker})${s.is_top_pick ? ' [TOP PICK]' : ''}\\n`;\n    response += `Confidence: ${s.confidence}% | Risk level: ${s.risk_level || 'N/A'}\\n`;\n    response += `Entry: $${s.entry_low} - $${s.entry_high}\\n`;\n    response += `Take-profit: $${s.take_profit} | Stop-loss: $${s.stop_loss}\\n`;\n    response += `Shares: ${s.suggested_shares} | Cost: $${s.estimated_cost}\\n`;\n    response += `Potential profit: +$${s.potential_profit} (+${s.upside_pct}%)\\n`;\n    response += `Potential loss: $${s.potential_loss} (${s.downside_pct}%)\\n`;\n    response += `Risk/Reward: ${s.risk_reward}\\n`;\n    if (s.risk_warnings && s.risk_warnings.length > 0) {\n      response += `Warnings: ${s.risk_warnings.join(', ')}\\n`;\n    }\n    response += `Catalysts: ${(s.catalysts || []).join(', ')}\\n`;\n    response += `Reasoning: ${s.reasoning}\\n`;\n    response += `Lesson: ${s.educational_note}\\n\\n`;\n  }\n}\n\nif (skipSignals.length > 0) {\n  response += '=== SKIP ===\\n\\n';\n  for (const s of skipSignals.slice(0, 5)) {\n    response += `${s.ticker}: ${s.reasoning}\\n`;\n  }\n  if (skipSignals.length > 5) {\n    response += `...and ${skipSignals.length - 5} more skipped.\\n`;\n  }\n}\n\nreturn [{ json: { response } }];"
+        "jsCode": "const data = $input.first().json;\n\nif (data.error || data._empty) {\n  return [{ json: { response: data.response || 'Scanner encountered an issue. Please try again.' } }];\n}\n\nconst holdingLabel = (h) => {\n  if (h === 'same_day') return 'Intraday';\n  return 'Swing (' + h + ')';\n};\n\nlet response = `MARKET SUMMARY: ${data.market_summary}\\n\\n`;\nresponse += `Found ${data.buy_count} BUY signals and ${data.skip_count} SKIP.\\n\\n`;\n\nconst buySignals = data.signals.filter(s => s.type === 'BUY');\nconst skipSignals = data.signals.filter(s => s.type === 'SKIP');\n\nif (buySignals.length > 0) {\n  response += '=== BUY SIGNALS ===\\n\\n';\n  for (const s of buySignals) {\n    response += `TICKER: ${s.ticker} (${s.company_name || s.ticker})${s.is_top_pick ? ' [TOP PICK]' : ''} | ${holdingLabel(s.suggested_holding)}\\n`;\n    response += `Confidence: ${s.confidence}% | Risk level: ${s.risk_level || 'N/A'}\\n`;\n    response += `Entry: $${s.entry_low} - $${s.entry_high}\\n`;\n    response += `Take-profit: $${s.take_profit} | Stop-loss: $${s.stop_loss}\\n`;\n    response += `Shares: ${s.suggested_shares} | Cost: $${s.estimated_cost}\\n`;\n    response += `Potential profit: +$${s.potential_profit} (+${s.upside_pct}%)\\n`;\n    response += `Potential loss: $${s.potential_loss} (${s.downside_pct}%)\\n`;\n    response += `Risk/Reward: ${s.risk_reward}\\n`;\n    if (s.risk_warnings && s.risk_warnings.length > 0) {\n      response += `Warnings: ${s.risk_warnings.join(', ')}\\n`;\n    }\n    response += `Catalysts: ${(s.catalysts || []).join(', ')}\\n`;\n    response += `Reasoning: ${s.reasoning}\\n`;\n    response += `Lesson: ${s.educational_note}\\n\\n`;\n  }\n}\n\nif (skipSignals.length > 0) {\n  response += '=== SKIP ===\\n\\n';\n  for (const s of skipSignals.slice(0, 5)) {\n    response += `${s.ticker}: ${s.reasoning}\\n`;\n  }\n  if (skipSignals.length > 5) {\n    response += `...and ${skipSignals.length - 5} more skipped.\\n`;\n  }\n}\n\nreturn [{ json: { response } }];"
       },
       "id": "e0000001-0001-0001-0001-000000000019",
       "name": "Format Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [3620, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Final output node - guarantees this is lastNodeExecuted\n// Reads from Format Response regardless of which parallel branch finished last\nreturn $('Format Response').all();"
+      },
+      "id": "e0000001-0001-0001-0001-000000000021",
+      "name": "Return Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3860, 400]
     }
   ],
   "connections": {
     "Trigger": {
-      "main": [[
-        {"node": "FMP Gainers", "type": "main", "index": 0},
-        {"node": "FMP Most Active", "type": "main", "index": 0},
-        {"node": "FMP Losers", "type": "main", "index": 0}
-      ]]
+      "main": [
+        [
+          { "node": "FMP Gainers", "type": "main", "index": 0 },
+          { "node": "FMP Most Active", "type": "main", "index": 0 },
+          { "node": "FMP Losers", "type": "main", "index": 0 }
+        ]
+      ]
     },
-    "FMP Gainers": {"main": [[{"node": "Merge & Deduplicate", "type": "main", "index": 0}]]},
-    "FMP Most Active": {"main": [[{"node": "Merge & Deduplicate", "type": "main", "index": 0}]]},
-    "FMP Losers": {"main": [[{"node": "Merge & Deduplicate", "type": "main", "index": 0}]]},
-    "Merge & Deduplicate": {"main": [[{"node": "Filter Candidates", "type": "main", "index": 0}]]},
-    "Filter Candidates": {"main": [[{"node": "Build Symbol List", "type": "main", "index": 0}]]},
-    "Build Symbol List": {"main": [[
-      {"node": "FMP Batch Quote", "type": "main", "index": 0},
-      {"node": "FMP Earnings Check", "type": "main", "index": 0}
-    ]]},
-    "FMP Batch Quote": {"main": [[{"node": "Merge Quote Data", "type": "main", "index": 0}]]},
-    "FMP Earnings Check": {"main": [[{"node": "Merge Quote Data", "type": "main", "index": 0}]]},
-    "Merge Quote Data": {"main": [[{"node": "Select Top 10 for News", "type": "main", "index": 0}]]},
-    "Select Top 10 for News": {"main": [[
-      {"node": "FMP News", "type": "main", "index": 0},
-      {"node": "Google News RSS", "type": "main", "index": 0}
-    ]]},
-    "FMP News": {"main": [[{"node": "Merge News", "type": "main", "index": 0}]]},
-    "Google News RSS": {"main": [[{"node": "Merge News", "type": "main", "index": 0}]]},
-    "Merge News": {"main": [[{"node": "Load Insights", "type": "main", "index": 0}]]},
-    "Load Insights": {"main": [[{"node": "Build AI Prompt", "type": "main", "index": 0}]]},
-    "Build AI Prompt": {"main": [[{"node": "AI Analysis", "type": "main", "index": 0}]]},
-    "AI Analysis": {"main": [[{"node": "Validate & Enrich", "type": "main", "index": 0}]]},
-    "Validate & Enrich": {"main": [[{"node": "Format Response", "type": "main", "index": 0}]]}
+    "FMP Gainers": {
+      "main": [[{ "node": "Merge & Deduplicate", "type": "main", "index": 0 }]]
+    },
+    "FMP Most Active": {
+      "main": [[{ "node": "Merge & Deduplicate", "type": "main", "index": 0 }]]
+    },
+    "FMP Losers": {
+      "main": [[{ "node": "Merge & Deduplicate", "type": "main", "index": 0 }]]
+    },
+    "Merge & Deduplicate": {
+      "main": [[{ "node": "Filter Candidates", "type": "main", "index": 0 }]]
+    },
+    "Filter Candidates": {
+      "main": [[{ "node": "Build Symbol List", "type": "main", "index": 0 }]]
+    },
+    "Build Symbol List": {
+      "main": [
+        [
+          { "node": "FMP Batch Quote", "type": "main", "index": 0 },
+          { "node": "FMP Earnings Check", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "FMP Batch Quote": {
+      "main": [[{ "node": "Merge Quote Data", "type": "main", "index": 0 }]]
+    },
+    "FMP Earnings Check": {
+      "main": [[{ "node": "Merge Quote Data", "type": "main", "index": 0 }]]
+    },
+    "Merge Quote Data": {
+      "main": [
+        [{ "node": "Select Top 10 for News", "type": "main", "index": 0 }]
+      ]
+    },
+    "Select Top 10 for News": {
+      "main": [
+        [
+          { "node": "FMP News", "type": "main", "index": 0 },
+          { "node": "Google News RSS", "type": "main", "index": 0 },
+          { "node": "Finnhub News", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "FMP News": {
+      "main": [[{ "node": "Merge News", "type": "main", "index": 0 }]]
+    },
+    "Google News RSS": {
+      "main": [[{ "node": "Merge News", "type": "main", "index": 0 }]]
+    },
+    "Finnhub News": {
+      "main": [[{ "node": "Merge News", "type": "main", "index": 0 }]]
+    },
+    "Merge News": {
+      "main": [[{ "node": "Load Insights", "type": "main", "index": 0 }]]
+    },
+    "Load Insights": {
+      "main": [[{ "node": "Build AI Prompt", "type": "main", "index": 0 }]]
+    },
+    "Build AI Prompt": {
+      "main": [[{ "node": "AI Analysis", "type": "main", "index": 0 }]]
+    },
+    "AI Analysis": {
+      "main": [[{ "node": "Validate & Enrich", "type": "main", "index": 0 }]]
+    },
+    "Validate & Enrich": {
+      "main": [[{ "node": "Format Response", "type": "main", "index": 0 }]]
+    },
+    "Format Response": {
+      "main": [[{ "node": "Return Response", "type": "main", "index": 0 }]]
+    }
   },
-  "settings": {"executionOrder": "v1"},
-  "tags": [{"name": "Finance"}]
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "Finance" }]
 }
