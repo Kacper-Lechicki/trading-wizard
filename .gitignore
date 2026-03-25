@@ -17,3 +17,6 @@ Thumbs.db
 
 # Agent local settings (not rules/commands - those are tracked)
 .claude/settings.local.json
+
+# Searxng
+config/searxng/settings.yml.new 

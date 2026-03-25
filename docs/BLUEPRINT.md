@@ -81,7 +81,7 @@ You type a message. The AI Agent reads it, decides what you want, and calls the 
 | **AI Agent**                   | The brain. Reads the language-tagged message, decides which tool to call, and formulates the response in the detected language. Uses the system prompt that defines its personality, rules, and risk disclosure requirements.                                                                                                                                                           |
 | **OpenRouter Chat Model**      | The LLM connection. Sends messages to Google Gemini Flash via OpenRouter. Temperature 0.3 (low = predictable, concrete answers).                                                                                                                                                                                                                                                        |
 | **Memory**                     | Remembers the last 20 messages so the AI knows what you said earlier in this conversation. Resets between sessions.                                                                                                                                                                                                                                                                     |
-| **scan_market** (tool)         | Calls the Market Scanner workflow. Supports intraday and swing trade detection. Accepts budget, currency, market, and fractional_shares (boolean) parameters. Triggered when you mention a budget and want to scan.                                                                                                                                                                     |
+| **scan_market** (tool)         | Calls the Market Scanner workflow. Intraday only. Accepts budget, currency (default: PLN), and fractional_shares (boolean) parameters. No market parameter — scanner always covers both US and EU markets, returning only stocks from currently-open exchanges. Triggered when you mention a budget and want to scan.                                                                     |
 | **log_trade** (tool)           | Calls the Trade Logger workflow. Triggered when you report a trade result.                                                                                                                                                                                                                                                                                                              |
 | **run_review** (tool)          | Calls the Weekly Review workflow. Triggered when you ask for a performance review.                                                                                                                                                                                                                                                                                                      |
 | **get_history** (tool)         | Calls the Get History sub-workflow. Triggered when you ask about past trades or stats.                                                                                                                                                                                                                                                                                                  |
@@ -92,8 +92,9 @@ You type a message. The AI Agent reads it, decides what you want, and calls the 
 
 - At the start of every conversation, the AI silently checks if a weekly review is due (via get_insights). If yes, it suggests running one.
 - Every BUY signal must include full risk disclosure: potential profit, potential loss, stop-loss explanation, risk level.
-- Supports swing trades (multi-day holds) alongside intraday trades, with appropriate holding period guidance.
+- All scan results are intraday only. Swing trade guidance has been removed.
 - Small budgets are supported via fractional shares - the price ceiling filter is disabled when fractional_shares is true.
+- The scanner auto-detects which exchanges are open at scan time and only returns stocks from those markets.
 - **Language detection**: A dedicated Code node (`Detect Language`) analyzes the user's message before the AI Agent sees it. It checks for Polish diacritics (ą, ć, ę, etc.) and common Polish words to determine the language, then tags the message with `[USER_LANGUAGE: ENGLISH]` or `[USER_LANGUAGE: POLISH]`. The AI Agent is instructed to respond in the tagged language - no guessing required.
 - Feedback tags (like "exited too early") are translated to the user's language when presented.
 - **Mandatory web search workflows**: The AI calls web_search automatically in specific situations: (A) after scan_market returns - searches top 2-3 tickers for latest news, (B) when user asks about a stock - searches before answering, (C) when user asks about market conditions - searches before answering, (D) when user asks to research/dig deeper - searches immediately, (E) before stating any current fact - verifies via search. Training data is treated as outdated for all market information.
@@ -109,16 +110,16 @@ The core engine. Scans the market, gathers data, and asks AI to analyze it.
 **Pipeline (what happens in order):**
 
 ```
-[Trigger] receives budget, currency, market preference
+[Trigger] receives budget, currency, fractional_shares
     |
     v
-[FMP Gainers + Most Active + Losers] -- 3 parallel API calls
-    |                                    fetch ~150 stocks total
+[FMP Gainers + Most Active + Losers + EU Screener] -- 4 parallel API calls
+    |                                                   fetch ~180 stocks total
     v
-[Merge & Deduplicate] -- combine all 3 lists, remove duplicates
-    |                     typically ~80-100 unique stocks
+[Merge & Deduplicate] -- combine all 4 lists, remove duplicates
+    |                     typically ~100-120 unique stocks
     v
-[Filter Candidates] -- remove junk, keep top 10
+[Filter Candidates] -- remove junk, gate by market hours, keep top 20
     |
     v
 [Build Symbol List] -- prepare ticker list for next steps
@@ -133,7 +134,7 @@ The core engine. Scans the market, gathers data, and asks AI to analyze it.
 [Merge Quote Data] -- combine screener data + quotes + earnings warnings
     |                  resilient: works even if quote/earnings nodes failed
     v
-[Select Top 10 for News] -- pick top candidates for news lookup
+[Select Top for News] -- pick top 20 candidates for news lookup
     |
     +--> [FMP News] -- company-specific news from FMP
     +--> [Google News RSS] -- general stock news from Google
@@ -167,7 +168,8 @@ The core engine. Scans the market, gathers data, and asks AI to analyze it.
     |                   - confidence < 60%? downgrade to SKIP
     |                   - risk/reward < 1.5? downgrade to SKIP
     |                   - missing risk fields? calculate them
-    |                   - cap at 5 BUY signals max
+    |                   - cap at 10 BUY signals max
+    |                   - force all signals to intraday
     v
 [Format Response] -- format signals as readable text for the AI Agent
     |                 includes: ticker, entry, stop-loss, take-profit,
@@ -181,18 +183,19 @@ The core engine. Scans the market, gathers data, and asks AI to analyze it.
 
 | Node                       | What it does                                                                                                                                                                                                                                                                                                                                                                                    |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Trigger**                | Receives parameters from the Chat AI Agent: budget (number), currency (USD/EUR/PLN), market (US/EU/BOTH), fractional_shares (boolean, default true).                                                                                                                                                                                                                                            |
+| **Trigger**                | Receives parameters from the Chat AI Agent: budget (number), currency (USD/EUR/PLN), fractional_shares (boolean, default true). No market parameter - scanner always covers both US and EU markets.                                                                                                                                                                                              |
 | **FMP Gainers**            | Fetches today's top gaining stocks from FMP (`/stable/biggest-gainers`). Returns ~50 stocks with symbol, price, change%. Continues on failure.                                                                                                                                                                                                                                                  |
 | **FMP Most Active**        | Fetches today's most traded stocks (`/stable/most-actives`). High volume = high liquidity = easier to trade. Continues on failure.                                                                                                                                                                                                                                                              |
 | **FMP Losers**             | Fetches today's biggest losers (`/stable/biggest-losers`). Oversold stocks sometimes bounce - potential opportunities. Continues on failure.                                                                                                                                                                                                                                                    |
+| **FMP EU Screener**        | Fetches actively-traded EU stocks (LSE, XETRA, Euronext) via FMP Screener API. Supplements the US-only top-mover endpoints with European candidates. Continues on failure.                                                                                                                                                                                                                     |
 | **Merge & Deduplicate**    | Combines all three lists into one and removes duplicate tickers. A stock that appears in both gainers and most-active is kept once.                                                                                                                                                                                                                                                             |
-| **Filter Candidates**      | Removes stocks that are unsuitable: penny stocks (< $1), OTC-listed stocks. Price ceiling (> 30% of budget) is disabled when fractional shares are enabled. Sorts by absolute price change and keeps top 10.                                                                                                                                                                                    |
+| **Filter Candidates**      | Removes stocks that are unsuitable: penny stocks (< $1), OTC-listed stocks. Price ceiling (> 30% of budget) is disabled when fractional shares are enabled. Gates by market hours - only stocks from currently-open exchanges pass through. Sorts by absolute price change and keeps top 20.                                                                                                    |
 | **Build Symbol List**      | Prepares a comma-separated list of ticker symbols for the next API calls.                                                                                                                                                                                                                                                                                                                       |
 | **FMP Batch Quote**        | Tries to fetch detailed quotes (volume, day high/low, market cap) for all candidates in one call. May fail on free tier - that's OK, pipeline continues with screener data.                                                                                                                                                                                                                     |
 | **FMP Earnings Check**     | Checks if any candidate reports earnings in the next 48 hours. Earnings are binary events (stock can jump 10% either way) - AI should warn about this. May fail on free tier.                                                                                                                                                                                                                   |
 | **Wait For Quotes**        | Synchronization barrier (n8n Merge node, append mode, 2 inputs). Waits for both FMP Batch Quote and FMP Earnings Check to complete before triggering Merge Quote Data. Prevents the pipeline from running multiple times due to parallel inputs arriving at different times.                                                                                                                     |
 | **Merge Quote Data**       | Combines screener data with quote data and earnings flags. If quote or earnings nodes failed, it uses screener data only. Resilient - never crashes the pipeline.                                                                                                                                                                                                                               |
-| **Select Top 10 for News** | Picks the top 10 candidates for news lookup. Limits API usage.                                                                                                                                                                                                                                                                                                                                  |
+| **Select Top for News**    | Picks the top 20 candidates for news lookup. Limits API usage.                                                                                                                                                                                                                                                                                                                                  |
 | **FMP News**               | Fetches company-specific news for selected tickers (`/stable/news/stock`). Returns headlines, summaries, sources. Continues on failure.                                                                                                                                                                                                                                                         |
 | **Google News RSS**        | Fetches general stock news from Google News RSS feed. Free, no API key, no limit. Catches news that financial APIs might miss. Continues on failure.                                                                                                                                                                                                                                            |
 | **Finnhub News**           | Fetches company news for the first candidate ticker from Finnhub (3-day lookback). Supplements FMP and Google news. Free, 60 req/min. Continues on failure.                                                                                                                                                                                                                                     |
@@ -200,18 +203,19 @@ The core engine. Scans the market, gathers data, and asks AI to analyze it.
 | **Wait For All News**      | Synchronization barrier (n8n Merge node, append mode, 2 inputs). Waits for Wait FMP+Google and Finnhub News to both complete before triggering Merge News. Together with Wait FMP+Google, ensures all 3 news sources are ready before the pipeline continues. Prevents duplicate pipeline executions.                                                                                            |
 | **Merge News**             | Combines news from all three sources (FMP, Google, Finnhub), groups by ticker, removes duplicates, limits to 5 per ticker. Resilient - uses try/catch on each source.                                                                                                                                                                                                                           |
 | **Load Insights**          | Queries Postgres for the latest weekly review insights. These are lessons learned from your past trades (e.g., "signals with high volume have 78% win rate"). Empty on first run. Set to always output data so the pipeline doesn't stop.                                                                                                                                                       |
-| **Build AI Prompt**        | The most important node. Assembles the complete prompt for AI analysis: all candidate data, news, earnings warnings, past insights, and detailed rules for signal quality and risk disclosure. Classifies trade type (intraday/swing) based on price patterns. Handles small budget scenarios with fractional share guidance. Instructs AI to write reasoning in user's language.               |
+| **Build AI Prompt**        | The most important node. Assembles the complete prompt for AI analysis: all candidate data, news, earnings warnings, past insights, and rules for signal quality and risk disclosure. Intraday only — no swing trade classification. Simplified (~300 words) for Gemini Flash efficiency. Handles small budget scenarios with fractional share guidance. Instructs AI to write reasoning in user's language. Max 10 BUY signals. |
 | **AI Analysis**            | Sends the assembled prompt to Gemini Flash via OpenRouter. Requests JSON output. 8192 token limit, 2-minute timeout. Cost: ~$0.01 per scan.                                                                                                                                                                                                                                                     |
-| **Validate & Enrich**      | Parses the AI JSON response. Enforces hard rules that the AI might miss: minimum 60% confidence, minimum 1.5 risk/reward ratio. Calculates missing fields (shares, cost, profit/loss). Defaults trade_type to "intraday" and suggested_holding to "same_day" if missing. Supports fractional shares (DECIMAL precision). Caps BUY signals at 5. Downgrades violations to SKIP with explanation. |
-| **Format Response**        | Converts validated signals into readable text that the Chat AI Agent will present to you. Includes all risk disclosure fields and trade type label (INTRADAY/SWING).                                                                                                                                                                                                                            |
+| **Validate & Enrich**      | Parses the AI JSON response. Enforces hard rules that the AI might miss: minimum 60% confidence, minimum 1.5 risk/reward ratio. Calculates missing fields (shares, cost, profit/loss). Forces trade_type to "intraday" and suggested_holding to "same_day" on all signals. Supports fractional shares (DECIMAL precision). Caps BUY signals at 10. Downgrades violations to SKIP with explanation. |
+| **Format Response**        | Converts validated signals into readable text that the Chat AI Agent will present to you. Includes all risk disclosure fields. All signals are labelled INTRADAY.                                                                                                                                                                                                                               |
 | **Return Response**        | Final node in the chain. Reads from Format Response and guarantees it is always the `lastNodeExecuted` in n8n. This is required because parallel branches (FMP calls, news calls) can complete after Format Response, and n8n uses chronological order to determine output. Without this node, the toolWorkflow would return the wrong node's data.                                             |
 
 **Resilience design:**
 
 The scanner is built to survive failures at every level:
 
-- **FMP completely unavailable (API limit reached):** Pipeline continues in "news only" mode. Select Top 10 uses fallback tickers (SPY, QQQ, AAPL, MSFT, TSLA) for news lookup. Build AI Prompt tells the AI to base analysis on news data and its own knowledge. AI can still produce recommendations.
+- **FMP completely unavailable (API limit reached):** Pipeline continues in "news only" mode. Select Top for News uses fallback tickers (SPY, QQQ, AAPL, MSFT, TSLA) for news lookup. Build AI Prompt tells the AI to base analysis on news data and its own knowledge. AI can still produce recommendations.
 - **Individual API failures:** FMP free tier doesn't support all endpoints - Batch Quote and Earnings Check may return 403. Every external API node has "continue on failure" enabled, and every merge node uses try/catch.
+- **Markets closed:** Filter Candidates gates by market hours. If no exchanges are currently open, the scanner returns a clear message about trading hours instead of empty or irrelevant results.
 - **Pipeline always reaches AI Analysis** with whatever data it could gather - from full FMP data + 3 news sources down to news-only mode.
 
 ---
@@ -391,6 +395,7 @@ Key fields: week start date, trades analyzed, win rate, insights (JSON array of 
 | Service                           | What it provides                                                | Limit            | Cost        |
 | --------------------------------- | --------------------------------------------------------------- | ---------------- | ----------- |
 | **FMP** (Financial Modeling Prep) | Stock screener (gainers/losers/active), news, earnings calendar | 250 requests/day | Free        |
+| **FMP Screener**                  | EU stock screening (LSE, XETRA, Euronext)                       | 250 req/day (shared with other FMP calls) | Free |
 | **Google News RSS**               | General stock news headlines                                    | Unlimited        | Free        |
 | **Finnhub**                       | Company news (supplementary, first candidate ticker)            | 60 requests/min  | Free        |
 | **OpenRouter** (Gemini Flash)     | AI analysis of stocks, weekly review                            | Pay per use      | ~$0.01/scan |
@@ -437,4 +442,4 @@ The system runs on your computer via Docker. Key implications:
 
 ---
 
-_Blueprint version 3.1 - March 2026_
+_Blueprint version 3.2 - March 2026_

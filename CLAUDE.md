@@ -28,7 +28,7 @@ Self-hosted via Docker (n8n + Postgres + SearXNG). Only external cost: OpenRoute
 ```
 n8n (Docker) - 7 workflow files, 6 AI agent tools
 ├── 07-chat-main.json      Chat (main interface - AI Agent with 6 tools)
-├── 05-market-scanner.json  Market Scanner (FMP + news + AI analysis, 24 nodes)
+├── 05-market-scanner.json  Market Scanner (FMP + EU screener + news + AI analysis, 25 nodes)
 ├── 04-trade-logger.json    Trade Logger (P&L calculation + Postgres)
 ├── 06-weekly-review.json   Weekly Review (stats + AI review + insights)
 ├── 02-get-history.json     Get History (Postgres query)
@@ -39,7 +39,7 @@ n8n (Docker) - 7 workflow files, 6 AI agent tools
 ├── SearXNG (Docker) - self-hosted meta-search engine for AI web research
 │
 └── External APIs:
-    ├── FMP (screener, quotes, news, earnings) - 250 req/day free
+    ├── FMP (screener/EU screener, quotes, news, earnings) - 250 req/day free
     ├── Google News RSS - unlimited, no key
     ├── Finnhub (company news) - 60 req/min free
     ├── OpenRouter / Gemini Flash (AI analysis) - pay-per-use
@@ -71,7 +71,7 @@ trading-wizard/
 │   ├── 02-get-history.json     # Trade history query
 │   ├── 03-get-insights.json    # Insights + review-due check
 │   ├── 04-trade-logger.json    # P&L calc + save trade
-│   ├── 05-market-scanner.json  # Full scan pipeline (21 nodes)
+│   ├── 05-market-scanner.json  # Full scan pipeline (25 nodes)
 │   ├── 06-weekly-review.json   # Performance review + insight generation
 │   └── 07-chat-main.json       # Main AI Agent interface
 ├── config/
@@ -265,7 +265,7 @@ Users replace these after importing workflows into n8n. Do not replace them with
 | `02-get-history.json`    | 3     | JOIN trades+signals, compute stats, format                                                  |
 | `03-get-insights.json`   | 3     | Load latest insights, check if review overdue                                               |
 | `04-trade-logger.json`   | 5     | Calculate P&L, find matching signal, save, confirm                                          |
-| `05-market-scanner.json` | 24    | Full pipeline: screen → filter → enrich → news → AI → validate → format → return            |
+| `05-market-scanner.json` | 25    | Full pipeline: screen (US+EU) → filter (market-hours gating) → enrich → news → AI → validate → format → return |
 | `06-weekly-review.json`  | 10    | Count check → load trades → stats → AI review → save insights → format                      |
 | `07-chat-main.json`      | 11    | Chat trigger → Detect Language → AI Agent (6 tools: 5 workflow + web_search) + LLM + Memory |
 | `docs/SETUP_GUIDE.md`    | -     | Installation guide from zero to working system                                              |
