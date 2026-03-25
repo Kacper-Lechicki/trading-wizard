@@ -28,7 +28,7 @@ Self-hosted via Docker (n8n + Postgres + SearXNG). Only external cost: OpenRoute
 ```
 n8n (Docker) - 7 workflow files, 6 AI agent tools
 ├── 07-chat-main.json      Chat (main interface - AI Agent with 6 tools)
-├── 05-market-scanner.json  Market Scanner (FMP + news + AI analysis)
+├── 05-market-scanner.json  Market Scanner (FMP + news + AI analysis, 24 nodes)
 ├── 04-trade-logger.json    Trade Logger (P&L calculation + Postgres)
 ├── 06-weekly-review.json   Weekly Review (stats + AI review + insights)
 ├── 02-get-history.json     Get History (Postgres query)
@@ -265,7 +265,7 @@ Users replace these after importing workflows into n8n. Do not replace them with
 | `02-get-history.json`    | 3     | JOIN trades+signals, compute stats, format                                                  |
 | `03-get-insights.json`   | 3     | Load latest insights, check if review overdue                                               |
 | `04-trade-logger.json`   | 5     | Calculate P&L, find matching signal, save, confirm                                          |
-| `05-market-scanner.json` | 21    | Full pipeline: screen → filter → enrich → news → AI → validate → format → return            |
+| `05-market-scanner.json` | 24    | Full pipeline: screen → filter → enrich → news → AI → validate → format → return            |
 | `06-weekly-review.json`  | 10    | Count check → load trades → stats → AI review → save insights → format                      |
 | `07-chat-main.json`      | 11    | Chat trigger → Detect Language → AI Agent (6 tools: 5 workflow + web_search) + LLM + Memory |
 | `docs/SETUP_GUIDE.md`    | -     | Installation guide from zero to working system                                              |

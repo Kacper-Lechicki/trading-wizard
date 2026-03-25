@@ -127,6 +127,9 @@ The core engine. Scans the market, gathers data, and asks AI to analyze it.
     +--> [FMP Earnings Check] -- check if any stock reports earnings in 48h
     |
     v
+[Wait For Quotes] -- sync barrier: waits for both quote + earnings before continuing
+    |
+    v
 [Merge Quote Data] -- combine screener data + quotes + earnings warnings
     |                  resilient: works even if quote/earnings nodes failed
     v
@@ -135,6 +138,12 @@ The core engine. Scans the market, gathers data, and asks AI to analyze it.
     +--> [FMP News] -- company-specific news from FMP
     +--> [Google News RSS] -- general stock news from Google
     +--> [Finnhub News] -- supplementary company news (first ticker)
+    |
+    v
+[Wait FMP+Google] -- sync barrier: waits for FMP News + Google News RSS
+    |
+    v
+[Wait For All News] -- sync barrier: waits for Wait FMP+Google + Finnhub News
     |
     v
 [Merge News] -- combine news from all three sources, deduplicate, limit 5 per ticker
@@ -181,11 +190,14 @@ The core engine. Scans the market, gathers data, and asks AI to analyze it.
 | **Build Symbol List**      | Prepares a comma-separated list of ticker symbols for the next API calls.                                                                                                                                                                                                                                                                                                                       |
 | **FMP Batch Quote**        | Tries to fetch detailed quotes (volume, day high/low, market cap) for all candidates in one call. May fail on free tier - that's OK, pipeline continues with screener data.                                                                                                                                                                                                                     |
 | **FMP Earnings Check**     | Checks if any candidate reports earnings in the next 48 hours. Earnings are binary events (stock can jump 10% either way) - AI should warn about this. May fail on free tier.                                                                                                                                                                                                                   |
+| **Wait For Quotes**        | Synchronization barrier (n8n Merge node, append mode, 2 inputs). Waits for both FMP Batch Quote and FMP Earnings Check to complete before triggering Merge Quote Data. Prevents the pipeline from running multiple times due to parallel inputs arriving at different times.                                                                                                                     |
 | **Merge Quote Data**       | Combines screener data with quote data and earnings flags. If quote or earnings nodes failed, it uses screener data only. Resilient - never crashes the pipeline.                                                                                                                                                                                                                               |
 | **Select Top 10 for News** | Picks the top 10 candidates for news lookup. Limits API usage.                                                                                                                                                                                                                                                                                                                                  |
 | **FMP News**               | Fetches company-specific news for selected tickers (`/stable/news/stock`). Returns headlines, summaries, sources. Continues on failure.                                                                                                                                                                                                                                                         |
 | **Google News RSS**        | Fetches general stock news from Google News RSS feed. Free, no API key, no limit. Catches news that financial APIs might miss. Continues on failure.                                                                                                                                                                                                                                            |
 | **Finnhub News**           | Fetches company news for the first candidate ticker from Finnhub (3-day lookback). Supplements FMP and Google news. Free, 60 req/min. Continues on failure.                                                                                                                                                                                                                                     |
+| **Wait FMP+Google**        | Synchronization barrier (n8n Merge node, append mode, 2 inputs). Waits for FMP News and Google News RSS to both complete.                                                                                                                                                                                                                                                                       |
+| **Wait For All News**      | Synchronization barrier (n8n Merge node, append mode, 2 inputs). Waits for Wait FMP+Google and Finnhub News to both complete before triggering Merge News. Together with Wait FMP+Google, ensures all 3 news sources are ready before the pipeline continues. Prevents duplicate pipeline executions.                                                                                            |
 | **Merge News**             | Combines news from all three sources (FMP, Google, Finnhub), groups by ticker, removes duplicates, limits to 5 per ticker. Resilient - uses try/catch on each source.                                                                                                                                                                                                                           |
 | **Load Insights**          | Queries Postgres for the latest weekly review insights. These are lessons learned from your past trades (e.g., "signals with high volume have 78% win rate"). Empty on first run. Set to always output data so the pipeline doesn't stop.                                                                                                                                                       |
 | **Build AI Prompt**        | The most important node. Assembles the complete prompt for AI analysis: all candidate data, news, earnings warnings, past insights, and detailed rules for signal quality and risk disclosure. Classifies trade type (intraday/swing) based on price patterns. Handles small budget scenarios with fractional share guidance. Instructs AI to write reasoning in user's language.               |
